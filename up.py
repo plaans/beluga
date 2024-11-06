@@ -101,39 +101,41 @@ def convert(instance: BelugaProblemDef, name: str) -> Problem:
         truck = p.add_object(trailer, truck_type)
         p.set_initial_value(truck_side(truck), production_side)
 
-    s = DurativeAction("swap", p=jig_type, r1=buffer_type, r2=buffer_type, truck=truck_type, side=side_type, oside=side_type)
+    def to_rack(a: DurativeAction, jig, rack, trailer, side, oside):
+        a.add_decrease_effect(EndTiming(), free(rack), size(jig))
+        a.add_increase_effect(EndTiming(), next(rack, side), 1)
+
+        # truck resource management
+        a.add_increase_effect(EndTiming(), free_trucks(side), 1)
+        # the conditions/effects below are only necessary to be able to name the truck but resource managament with free_trucks should be sufficent
+        a.add_effect(EndTiming(), available(trailer), True)
+
+        a.add_effect(EndTiming(), at(jig), rack)
+        a.add_effect(EndTiming(), pos(jig, side), next(rack, side) + 1)
+        a.add_effect(EndTiming(), pos(jig, oside), -next(rack, side))
+
+    def from_rack(a: DurativeAction, jig, rack, trailer, side, oside):
+        a.add_condition(StartTiming(), Equals(at(jig), rack))
+        a.add_condition(StartTiming(), Equals(next(rack, side), pos(jig, side)))
+        a.add_condition(StartTiming(), Equals(truck_side(trailer), side))
+
+        a.add_increase_effect(StartTiming(), free(rack), size(jig))
+        a.add_decrease_effect(StartTiming(), next(rack, side), 1)
+
+        # truck resource management
+        a.add_decrease_effect(StartTiming(), free_trucks(side), 1)
+        a.add_effect(StartTiming(), at(jig), trailer)
+        # the conditions/effects below are only necessary to be able to name the truck but resource managament with free_trucks should be sufficent
+        a.add_condition(StartTiming(), available(trailer))
+        a.add_effect(StartTiming(), available(trailer), False)
+
+
+    s = DurativeAction("swap", p=jig_type, r1=buffer_type, r2=buffer_type, trailer=truck_type, side=side_type, oside=side_type)
     s.set_closed_duration_interval(1, 1000)
-    # ensure that p is the next part on r1
-    s.add_condition(StartTiming(), Equals(at(s.p), s.r1))
-    s.add_condition(StartTiming(), Equals(next(s.r1, s.side), pos(s.p, s.side)))
     s.add_condition(StartTiming(), Equals(opposite(s.side), s.oside))
-    s.add_condition(StartTiming(), Equals(truck_side(s.truck), s.side))
+    from_rack(s, s.p, s.r1, s.trailer, s.side, s.oside)
+    to_rack(s, s.p, s.r2, s.trailer, s.side, s.oside)
     
-    # unclear whether this is useful
-    # # do not add to beluga or remove from production
-    # for beluga in instance.flights:
-    #     s.add_condition(StartTiming(), Not(Equals(s.r2, p.object(beluga.name))))
-    # for pline in instance.production_lines:
-    #     s.add_condition(StartTiming(), Not(Equals(s.r1, p.object(pline.name))))
-
-    s.add_increase_effect(StartTiming(), free(s.r1), size(s.p))
-    s.add_decrease_effect(EndTiming(), free(s.r2), size(s.p))
-    s.add_decrease_effect(StartTiming(), next(s.r1, s.side), 1)
-    s.add_increase_effect(EndTiming(), next(s.r2, s.side), 1)
-
-    # truck resource management
-    s.add_decrease_effect(StartTiming(), free_trucks(s.side), 1)
-    s.add_increase_effect(EndTiming(), free_trucks(s.side), 1)
-    s.add_effect(StartTiming(), at(s.p), s.truck)
-    # the conditions/effects below are only necessary to be able to name the truck but resource managament with free_trucks should be sufficent
-    s.add_condition(StartTiming(), available(s.truck))
-    s.add_effect(StartTiming(), available(s.truck), False)
-    s.add_effect(EndTiming(), available(s.truck), True)
-
-    s.add_effect(EndTiming(), at(s.p), s.r2)
-    s.add_effect(EndTiming(), pos(s.p, s.side), next(s.r2, s.side) + 1)
-    s.add_effect(EndTiming(), pos(s.p, s.oside), -next(s.r2, s.side))
-
     p.add_action(s)
 
     for jig in instance.jigs:
