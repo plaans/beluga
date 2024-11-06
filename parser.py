@@ -47,6 +47,13 @@ class BelugaProblemDef:
     production_lines: list[ProductionLine]
     flights: list[Flight]
 
+    def get_jig_type(self, name: str) -> JigType:
+        return next(x for x in self.jig_types if x.name == name)
+    
+
+    def get_jig(self, name: str) -> Jig:
+        return next(x for x in self.jigs if x.name == name)
+
 
 def parse(d) -> BelugaProblemDef:
     p = BelugaProblemDef(
