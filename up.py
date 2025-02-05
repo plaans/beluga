@@ -57,12 +57,14 @@ def convert(instance: BelugaProblemDef, name: str) -> Problem:
     # size_loaded = p.add_fluent("size_loaded", IntType(), part=jig_type)
 
     part_location_type = UserType("PartLoc")
-    buffer_type = UserType("Buffer", part_location_type)
-    rack_type = UserType("Rack", father=buffer_type)
-    hangar_type = UserType("Hangar", father=buffer_type)
-    free = p.add_fluent("free_space", IntType(lower_bound=0, upper_bound=1000), r=buffer_type)
+    beluga_type = UserType("Beluga", part_location_type)
+    rack_type = UserType("Rack", father=part_location_type)
+    hangar_type = UserType("Hangar", father=part_location_type)
+    production_line_type = UserType("ProductionLine", part_location_type)
+    free = p.add_fluent("free_space", IntType(lower_bound=0, upper_bound=1000), r=rack_type)
+    free_hangar = p.add_fluent("free_hangar", BoolType(), h=hangar_type)
 
-    next = Fluent("next", IntType(), r=buffer_type, s=side_type)
+    next = Fluent("next", IntType(), r=rack_type, s=side_type)
     p.add_fluent(next, default_initial_value=0)
     at = p.add_fluent("at", part_location_type, p=jig_type)
     pos = p.add_fluent("pos", IntType(), p=jig_type, s=side_type)
@@ -71,19 +73,17 @@ def convert(instance: BelugaProblemDef, name: str) -> Problem:
     
     belugas = {}
     for beluga in instance.flights:
-        b = p.add_object(beluga.name, buffer_type)
-        p.set_initial_value(free(b), 500)  # leave space
+        b = p.add_object(beluga.name, beluga_type)
         belugas[beluga.name] = b
 
     hangars = {}
     for hangar in instance.hangars:
         h = p.add_object(hangar, hangar_type)
-        p.set_initial_value(free(h), 500)  # leave space
+        p.set_initial_value(free_hangar(h), True)
         hangars[hangar] = h
 
     for pline in instance.production_lines:
-        pline_obj = p.add_object(pline.name, buffer_type)
-        p.set_initial_value(free(pline_obj), 1000)
+        pline_obj = p.add_object(pline.name, production_line_type)
 
     truck_type = UserType("Truck", part_location_type)
     available = Fluent("available", BoolType(), t=truck_type)
@@ -101,14 +101,22 @@ def convert(instance: BelugaProblemDef, name: str) -> Problem:
         truck = p.add_object(trailer, truck_type)
         p.set_initial_value(truck_side(truck), production_side)
 
+    def load_to_trailer(a: DurativeAction, jig, trailer, side):
+        a.add_condition(StartTiming(), Equals(truck_side(trailer), side))
+        a.add_decrease_effect(StartTiming(), free_trucks(side), 1)
+        a.add_effect(StartTiming(), at(jig), trailer)
+        a.add_condition(StartTiming(), available(trailer))
+        a.add_effect(StartTiming(), available(trailer), False)
+
+    def unload_from_trailer(a: DurativeAction, jig, trailer, side):
+        a.add_condition(StartTiming(), Equals(truck_side(trailer), side))
+        a.add_increase_effect(EndTiming(), free_trucks(side), 1)
+        a.add_effect(EndTiming(), available(trailer), True)
+
     def to_rack(a: DurativeAction, jig, rack, trailer, side, oside):
+        unload_from_trailer(a, jig, trailer, side)
         a.add_decrease_effect(EndTiming(), free(rack), size(jig))
         a.add_increase_effect(EndTiming(), next(rack, side), 1)
-
-        # truck resource management
-        a.add_increase_effect(EndTiming(), free_trucks(side), 1)
-        # the conditions/effects below are only necessary to be able to name the truck but resource managament with free_trucks should be sufficent
-        a.add_effect(EndTiming(), available(trailer), True)
 
         a.add_effect(EndTiming(), at(jig), rack)
         a.add_effect(EndTiming(), pos(jig, side), next(rack, side) + 1)
@@ -117,26 +125,46 @@ def convert(instance: BelugaProblemDef, name: str) -> Problem:
     def from_rack(a: DurativeAction, jig, rack, trailer, side, oside):
         a.add_condition(StartTiming(), Equals(at(jig), rack))
         a.add_condition(StartTiming(), Equals(next(rack, side), pos(jig, side)))
-        a.add_condition(StartTiming(), Equals(truck_side(trailer), side))
-
         a.add_increase_effect(StartTiming(), free(rack), size(jig))
         a.add_decrease_effect(StartTiming(), next(rack, side), 1)
+        load_to_trailer(a, jig, trailer, side)
 
-        # truck resource management
-        a.add_decrease_effect(StartTiming(), free_trucks(side), 1)
-        a.add_effect(StartTiming(), at(jig), trailer)
-        # the conditions/effects below are only necessary to be able to name the truck but resource managament with free_trucks should be sufficent
-        a.add_condition(StartTiming(), available(trailer))
-        a.add_effect(StartTiming(), available(trailer), False)
+        
 
 
-    s = DurativeAction("swap", p=jig_type, r1=buffer_type, r2=buffer_type, trailer=truck_type, side=side_type, oside=side_type)
-    s.set_closed_duration_interval(1, 1000)
-    s.add_condition(StartTiming(), Equals(opposite(s.side), s.oside))
-    from_rack(s, s.p, s.r1, s.trailer, s.side, s.oside)
-    to_rack(s, s.p, s.r2, s.trailer, s.side, s.oside)
-    
-    p.add_action(s)
+    swap = DurativeAction("swap", p=jig_type, r1=rack_type, r2=rack_type, trailer=truck_type, side=side_type, oside=side_type)
+    swap.set_closed_duration_interval(1, 1000)
+    swap.add_condition(StartTiming(), Equals(opposite(swap.side), swap.oside))
+    from_rack(swap, swap.p, swap.r1, swap.trailer, swap.side, swap.oside)
+    to_rack(swap, swap.p, swap.r2, swap.trailer, swap.side, swap.oside)
+    p.add_action(swap)
+
+    unload = DurativeAction("unload", jig=jig_type, beluga=beluga_type, rack=rack_type, trailer=truck_type)
+    unload.set_closed_duration_interval(1, 1000)
+    to_rack(unload, unload.jig, unload.rack, unload.trailer, beluga_side, production_side)
+    load_to_trailer(unload, unload.jig, unload.trailer, beluga_side)
+    p.add_action(unload)
+
+    load = DurativeAction("load", jig=jig_type, beluga=beluga_type, rack=rack_type, trailer=truck_type)
+    load.set_closed_duration_interval(1, 1000)
+    from_rack(load, load.jig, load.rack, load.trailer, beluga_side, production_side)
+    unload_from_trailer(load, load.jig, load.trailer, beluga_side)
+    p.add_action(load)
+
+    send_prod = DurativeAction("send-prod", jig=jig_type, prod_line=production_line_type, rack=rack_type, hangar=hangar_type, trailer=truck_type)
+    send_prod.set_closed_duration_interval(1, 1000)
+    send_prod.add_condition(EndTiming(), free_hangar(send_prod.hangar))
+    send_prod.add_effect(EndTiming(), free_hangar(send_prod.hangar), False)
+    from_rack(send_prod, send_prod.jig, send_prod.rack, send_prod.trailer, production_side, beluga_side)
+    unload_from_trailer(send_prod, send_prod.jig, send_prod.trailer, production_side)
+    p.add_action(send_prod)
+
+    retrieve_prod = DurativeAction("retrieve-prod", jig=jig_type, prod_line=production_line_type, rack=rack_type, hangar=hangar_type, trailer=truck_type)
+    retrieve_prod.set_closed_duration_interval(1, 1000)
+    retrieve_prod.add_effect(StartTiming(), free_hangar(retrieve_prod.hangar), True)
+    to_rack(retrieve_prod, retrieve_prod.jig, retrieve_prod.rack, retrieve_prod.trailer, production_side, beluga_side)
+    load_to_trailer(retrieve_prod, retrieve_prod.jig, retrieve_prod.trailer, production_side)
+    p.add_action(retrieve_prod)
 
     for jig in instance.jigs:
         part_obj = p.add_object(jig.name, jig_types[jig.type])
@@ -179,18 +207,14 @@ def convert(instance: BelugaProblemDef, name: str) -> Problem:
         flight = instance.flights[flight_number]
         beluga = p.object(flight.name)
 
-        p.set_initial_value(next(beluga, beluga_side), len(flight.incoming) )
-        
         prev = None
         for i, jig_name in enumerate(flight.incoming):
             jig = p.object(jig_name)
-            p.set_initial_value(pos(jig, beluga_side), i + 1)
-            p.set_initial_value(at(jig), beluga)
 
             # add task to unload from beluga
             r = p.task_network.add_variable(f"r_{jig_name}_1", rack_type)
             truck = p.task_network.add_variable(f"t_{jig_name}_1", truck_type)
-            t = p.task_network.add_subtask(s, jig, beluga, r, truck, beluga_side, production_side)
+            t = p.task_network.add_subtask(unload, jig, beluga, r, truck)
             
             p.task_network.add_constraint(LT(epochs[flight_number].end, t.start))
             p.task_network.add_constraint(LT(t.end, epochs[flight_number+1].start))
@@ -212,7 +236,7 @@ def convert(instance: BelugaProblemDef, name: str) -> Problem:
             jig = p.task_network.add_variable(f"jig_{flight.name}_{i}", jig_type)
             r = p.task_network.add_variable(f"r_{flight.name}_{i}", rack_type)
             truck = p.task_network.add_variable(f"t_{flight.name}_{i}", truck_type)
-            t = p.task_network.add_subtask(s, jig, r, beluga, truck, beluga_side, production_side)
+            t = p.task_network.add_subtask(load, jig, beluga, r, truck)
             
             p.task_network.add_constraint(LT(epochs[flight_number+1].end, t.start))
             p.task_network.add_constraint(LT(t.end, epochs[flight_number+2].start))
@@ -225,7 +249,6 @@ def convert(instance: BelugaProblemDef, name: str) -> Problem:
         add_unloading(i)
         add_loading(i)
     
-
     for pline in instance.production_lines:
         
         pline_obj = p.object(pline.name)
@@ -234,41 +257,43 @@ def convert(instance: BelugaProblemDef, name: str) -> Problem:
             jig = p.object(jig_name)
             # p.add_goal(Equals(at(part_obj), pline_obj))
             # p.add_goal(Equals(pos(part_obj, production_side), i +1))
+            #  send_prod = DurativeAction("send-prod", jig=jig_type, prod_line=production_line_type, rack=rack_type, hangar=hangar_type, trailer=truck_type)
+   
 
             # add task to load to production line
-            r = p.task_network.add_variable(f"r_{jig_name}_2", rack_type)
-            truck = p.task_network.add_variable(f"t_{jig_name}_2", truck_type)
+            rack = p.task_network.add_variable(f"r_{jig_name}_2", rack_type)
+            trailer = p.task_network.add_variable(f"t_{jig_name}_2", truck_type)
             hangar = p.task_network.add_variable(f"h_{jig_name}_2", hangar_type)
-            t_load = p.task_network.add_subtask(s, jig, r, hangar, truck, production_side, beluga_side)
+            t_send = p.task_network.add_subtask(send_prod, jig, pline_obj, rack, hangar, trailer)
             
             # add task to retrieve empty jig from hangar
-            r = p.task_network.add_variable(f"r_return_{jig_name}_2", rack_type)
-            truck = p.task_network.add_variable(f"t_return_{jig_name}_2", truck_type)
-            t_return = p.task_network.add_subtask(s, jig, hangar, r, truck, production_side, beluga_side)
+            rack = p.task_network.add_variable(f"r_return_{jig_name}_2", rack_type)
+            trailer = p.task_network.add_variable(f"t_return_{jig_name}_2", truck_type)
+            t_retrieve = p.task_network.add_subtask(retrieve_prod, jig, pline_obj, rack, hangar, trailer)
             
-            p.task_network.add_constraint(LT(t_load.end, t_return.start))
+            p.task_network.add_constraint(LT(t_send.end, t_retrieve.start))
 
             if prev is not None:
-                p.task_network.add_constraint(LT(prev.end, t_load.end))
-            prev = t_load
+                p.task_network.add_constraint(LT(prev.end, t_send.end))
+            prev = t_send
         
         
             
     
-    # # add task to allow an arbitrary number of swaps between racks
-    # do_swaps = p.add_task("do_swaps")
-    # m1 = Method("m-noop")
-    # m1.set_task(do_swaps)
-    # p.add_method(m1)
+    # add task to allow an arbitrary number of swaps between racks
+    do_swaps = p.add_task("do_swaps")
+    m1 = Method("m-noop")
+    m1.set_task(do_swaps)
+    p.add_method(m1)
 
-    # m2 = Method("m-do-rec", p=jig_type, r1=rack_type, r2=rack_type, t=truck_type, side=side_type, oside=side_type)
-    # m2.set_task(do_swaps)
-    # swap_subtask = m2.add_subtask(s, m2.p, m2.r1, m2.r2, m2.t, m2.side, m2.oside)
-    # rec_subtask = m2.add_subtask(do_swaps)
-    # m2.set_ordered(swap_subtask, rec_subtask)
-    # p.add_method(m2)
+    m2 = Method("m-do-rec", p=jig_type, r1=rack_type, r2=rack_type, t=truck_type, side=side_type, oside=side_type)
+    m2.set_task(do_swaps)
+    swap_subtask = m2.add_subtask(swap, m2.p, m2.r1, m2.r2, m2.t, m2.side, m2.oside)
+    rec_subtask = m2.add_subtask(do_swaps)
+    m2.set_ordered(swap_subtask, rec_subtask)
+    p.add_method(m2)
 
-    # p.task_network.add_subtask(do_swaps)
+    p.task_network.add_subtask(do_swaps)
 
 
 
@@ -285,5 +310,5 @@ if __name__ == "__main__":
     up = convert(pb, file)
     print(up)
     serialize(up, "/tmp/beluga.upp")
-    solve(up)
+    # solve(up)
 
