@@ -722,102 +722,423 @@ def make_problem(pb_def: BelugaProblemDef, name: str, num_available_swaps: int=2
     ##### End #####
 
     return pb, pb_metadata
+
+@dataclass
+class BelugaPlanProblemMatching:
+    struct_vars_plan_assignments: dict[up.Parameter, ConstantExpression]
+    struct_map_plan_action_to_subtask: dict[int, up_htn.Subtask | tuple[bool, up_htn.Subtask]]
+    struct_map_plan_action_to_subtask_inv: dict[up_htn.Subtask | tuple[bool, up_htn.Subtask], int]
+    pref_at_least_one_rack_always_empty: bool
+    pref_rack_always_empty: dict[up.Object, bool]
+    # pref_always_jigs_of_same_type_on_rack: dict[up.Object, bool]
+    pref_max_rack_size_used_for_jig: dict[up.Object, int]
+    pref_putdown_full_delay: dict[up.Object, int]
+    pref_putdown_empty_delay: dict[up.Object, int]
+    all_non_swap_subtasks_not_required_by_plan: list[up_htn.Subtask]
+
+def analyse_reference_plan(
+    plan_def: BelugaPlanDef,
+    pb: up_htn.HierarchicalProblem,
+    pb_metadata: BelugaProblemMetadata,
+) -> BelugaPlanProblemMatching:
+
+    pb_unload_jig_from_beluga_to_trailer = pb_metadata.pb_unload_jig_from_beluga_to_trailer
+    pb_load_jig_from_trailer_to_beluga = pb_metadata.pb_load_jig_from_trailer_to_beluga
+    pb_putdown_jig_on_rack = pb_metadata.pb_putdown_jig_on_rack
+    pb_pickup_jig_from_rack = pb_metadata.pb_pickup_jig_from_rack
+    pb_deliver_jig_to_hangar = pb_metadata.pb_deliver_jig_to_hangar
+    pb_get_jig_from_hangar = pb_metadata.pb_get_jig_from_hangar
+    pb_proceed_to_next_flight = pb_metadata.pb_proceed_to_next_flight
+    pb_all_unloads = pb_metadata.pb_all_unloads
+    pb_all_loads = pb_metadata.pb_all_loads
+    pb_all_delivers = pb_metadata.pb_all_delivers
+    pb_all_gets = pb_metadata.pb_all_gets
+    pb_all_swaps = pb_metadata.pb_all_swaps
+    pb_all_proceed_to_next_flight = pb_metadata.pb_all_proceed_to_next_flight
+    pb_num_used_swaps = pb_metadata.pb_num_used_swaps
+
+    struct_vars_plan_assignments: dict[up.Parameter, ConstantExpression] = {}
+    struct_map_plan_action_to_subtask: dict[int, up_htn.Subtask | tuple[bool, up_htn.Subtask]] = {}
+    struct_map_plan_action_to_subtask_inv: dict[up_htn.Subtask | tuple[bool, up_htn.Subtask], int] = {}
+
+    ##### Match problem subtasks (+ parameters/variables) with plan actions (+ parameter/variable assignments) #####
+
+    def insert(plan_action_index: int, subtask: up_htn.Subtask | tuple[bool, up_htn.Subtask]):
+        assert plan_action_index not in struct_map_plan_action_to_subtask and subtask not in struct_map_plan_action_to_subtask_inv
+        struct_map_plan_action_to_subtask[plan_action_index] = subtask
+        struct_map_plan_action_to_subtask_inv[subtask] = plan_action_index
+
+    def contains_plan_action(plan_action_index: int) -> bool:
+        return plan_action_index in struct_map_plan_action_to_subtask
+    
+    def contains_subtask(subtask: up_htn.Subtask | tuple[bool, up_htn.Subtask]) -> bool:
+        return subtask in struct_map_plan_action_to_subtask_inv
+
+    def insert_var_assignment(var: up.Parameter, val: ConstantExpression):
+        assert var not in struct_vars_plan_assignments
+        struct_vars_plan_assignments[var] = val
+
+#    def build_plan_subtask_order_constraints(self):
+#        n = len(self._act_subt_map)
+#        prev = None
+#        for i in range(n):
+#            v = self._act_subt_map[i]
+#            if isinstance(v, up_htn.Subtask):
+#                st = v
+#                tp = st.start
+#                if prev is not None:
+#                    up.LE(prev, tp)
+#                prev = tp
+#            else:
+#                assert isinstance(v, tuple)
+#                swap_st: up_htn.Subtask = v[1]
+#                tp = swap_st.start if v[0] == False else self._swap_aux_ts[swap_st]
+#                if prev is not None:
+#                    up.LE(prev, tp)
+#                prev = tp
+
+    (num_encountered_load, num_encountered_proceed_to_next_flight) = (0, 0)
+
+    plan_len = len(plan_def)
+
+    for k in range(plan_len):
+        a_k = plan_def[k]
+
+        if a_k.name == pb_unload_jig_from_beluga_to_trailer.name:
+            for (unload_st, putdown_st) in pb_all_unloads:
+                if (unload_st.parameters[0].object() == pb.object(a_k.params['j'])
+                    and not contains_subtask(unload_st)
+                ):
+                    insert(k, unload_st)
+                    for kk in range(k+1, plan_len):
+                        a_kk = plan_def[kk]
+
+                        if (a_kk.name == pb_putdown_jig_on_rack.name
+                            and putdown_st.parameters[0].object() == pb.object(a_kk.params['j'])
+                            and a_k.params['t'] == a_kk.params['t']
+                        ):
+                            insert(kk, putdown_st)
+                            insert_var_assignment(putdown_st.parameters[1].parameter(), pb.object(a_k.params['t']))
+                            insert_var_assignment(putdown_st.parameters[2].parameter(), pb.object(a_kk.params['r']))
+                            insert_var_assignment(putdown_st.parameters[5].parameter(), pb_metadata.rack_size[pb.object(a_kk.params['r'])])
+                            break
+                    break
+
+        elif a_k.name == pb_load_jig_from_trailer_to_beluga.name:
+            (pickup_st, load_st) = pb_all_loads[num_encountered_load]
+            insert(k, load_st)
+            for kk in range(k-1, -1, -1):
+                a_kk = plan_def[kk]
+
+                if (a_kk.name == pb_pickup_jig_from_rack.name
+                    and a_k.params['j'] == a_kk.params['j']
+                    and a_k.params['t'] == a_kk.params['t']
+                ):
+                    insert(kk, pickup_st)
+                    insert_var_assignment(pickup_st.parameters[0].parameter(), pb.object(a_k.params['j']))
+                    insert_var_assignment(pickup_st.parameters[1].parameter(), pb.object(a_k.params['t']))
+                    insert_var_assignment(pickup_st.parameters[2].parameter(), pb.object(a_kk.params['r']))
+                    break
+            num_encountered_load += 1
+
+        elif a_k.name == pb_deliver_jig_to_hangar.name:
+            for (pickup_st, deliver_st) in pb_all_delivers:
+                if (deliver_st.parameters[0].object() == pb.object(a_k.params['j'])
+                    and deliver_st.parameters[3].object() == pb.object(a_k.params['pl'])
+                    and not contains_subtask(deliver_st)
+                ):
+                    insert(k, deliver_st)
+                    for kk in range(k-1, -1, -1):
+                        a_kk = plan_def[kk]
+        
+                        if (a_kk.name == pb_pickup_jig_from_rack.name
+                            and pickup_st.parameters[0].object() == pb.object(a_kk.params['j'])
+                            and a_k.params['t'] == a_kk.params['t']
+                        ):
+                            insert(kk, pickup_st)
+                            insert_var_assignment(pickup_st.parameters[1].parameter(), pb.object(a_k.params['t']))
+                            insert_var_assignment(pickup_st.parameters[2].parameter(), pb.object(a_kk.params['r']))
+                            break
+                    break
+
+        elif a_k.name == pb_get_jig_from_hangar.name:
+            for (get_st, putdown_st) in pb_all_gets:
+                if (get_st.parameters[0].object() == pb.object(a_k.params['j'])
+                    and not contains_subtask(get_st)
+                ):
+                    insert(k, get_st)
+                    for kk in range(k+1, plan_len):
+                        a_kk = plan_def[kk]
+
+                        if (plan_def[kk].name == pb_putdown_jig_on_rack.name
+                            and putdown_st.parameters[0].object() == pb.object(a_kk.params['j'])
+                            and a_k.params['t'] == a_kk.params['t']
+                        ):
+                            insert(kk, putdown_st)
+                            insert_var_assignment(putdown_st.parameters[1].parameter(), pb.object(a_k.params['t']))
+                            insert_var_assignment(putdown_st.parameters[2].parameter(), pb.object(a_kk.params['r']))
+                            insert_var_assignment(putdown_st.parameters[5].parameter(), pb_metadata.rack_size[pb.object(a_kk.params['r'])])
+                            break
+                    break
+
+        elif a_k.name == pb_proceed_to_next_flight.name:
+            insert(k, pb_all_proceed_to_next_flight[num_encountered_proceed_to_next_flight])
+            num_encountered_proceed_to_next_flight += 1
+
         else:
-            t = p.task_network.add_subtask(proceed_to_next)
-            epochs.append(t)
-        if i > 1:
-            p.task_network.add_constraint(LT(epochs[i-1].end, t.start))
+            continue
 
-    def add_unloading(flight_number: int):
-        flight = instance.flights[flight_number]
-        beluga = p.object(flight.name)
+    swap_id = 0
+    for k in range(plan_len):
+        a_k = plan_def[k]
 
-        prev = None
-        for i, jig_name in enumerate(flight.incoming):
-            jig = p.object(jig_name)
+        if a_k.name == pb_pickup_jig_from_rack.name and not contains_plan_action(k):
+            for kk in range(k+1, plan_len):
+                a_kk = plan_def[kk]
+                if (not contains_plan_action(kk)
+                    and a_kk.name == pb_putdown_jig_on_rack.name
+                    and a_k.params['j'] == a_kk.params['j']
+                    and a_k.params['t'] == a_kk.params['t']
+                    and a_k.params['s'] == a_kk.params['s']
+                ):
+                    swap = pb.task_network.get_subtask(pb_all_swaps[swap_id].identifier)
+                    insert(k, (False, swap))
+                    insert(kk, (True, swap))
 
-            rack = p.task_network.add_variable(f"r_{jig_name}_1", rack_type)
-            trailer = p.task_network.add_variable(f"t_{jig_name}_1", trailer_type)
+                    insert_var_assignment(swap.parameters[0].parameter(), up.FALSE())
+                    insert_var_assignment(swap.parameters[1].parameter(), swap_id)
+                    insert_var_assignment(swap.parameters[2].parameter(), pb.object(a_k.params['j']))
+                    insert_var_assignment(swap.parameters[3].parameter(), pb.object(a_k.params['r']))
+                    insert_var_assignment(swap.parameters[4].parameter(), pb.object(a_kk.params['r']))
+                    insert_var_assignment(swap.parameters[5].parameter(), pb.object(a_k.params['t']))
+                    insert_var_assignment(swap.parameters[6].parameter(), pb.object(a_k.params['s']))
+                    insert_var_assignment(swap.parameters[7].parameter(), pb_metadata.rack_size[pb.object(a_kk.params['r'])])
 
-            # add tasks to unload from beluga
-            t1 = p.task_network.add_subtask(unload_jig_from_beluga_to_trailer, jig, beluga, trailer)
-            t2 = p.task_network.add_subtask(put_down_jig_on_rack, jig, trailer, rack, beluga_side, production_side)
+                    swap_id += 1
+                    break
 
-            p.task_network.set_ordered(t1, t2)
+    insert_var_assignment(pb_num_used_swaps, swap_id)
 
-            if flight_number > 0:
-                p.task_network.add_constraint(LT(epochs[flight_number].end, t1.start))
-            if flight_number < len(instance.flights)-1:
-                p.task_network.add_constraint(LT(t2.end, epochs[flight_number+1].start))
+    # Assign the "is_noop" variable of the remaining / not used swaps to False
+    for swap in pb_all_swaps:
+        if (not contains_subtask((False, swap))
+            and not contains_subtask((True, swap))
+        ):
+            insert_var_assignment(swap.parameters[0].parameter(), up.TRUE())
 
-            if prev is not None:
-                p.task_network.add_constraint(LT(t1.start, prev.start))
-            prev = t1
+    #print(set(range(plan_len)).difference(plan_action_to_subtask_map.keys()))
+    assert len(set(range(plan_len)).difference(struct_map_plan_action_to_subtask.keys())) == 0
+
+    ##### Read values of preferences in the plan #####
+
+    # size of largest rack onto which the same jig is placed
+
+    pref_max_rack_size_used_for_jig = {}
+    for j in pb_metadata.pb_def.jigs:
+        jig_name = j.name
+        jig = pb.object(jig_name)
+
+        if pb.fluent("at")(jig) in pb.explicit_initial_values:
+            jig_initially_at = pb.explicit_initial_values[pb.fluent("at")(jig)].object()
+        else:
+            jig_initially_at = None
+        if jig_initially_at in pb_metadata.rack_size: # if the initial location of the jig is actually a rack
+            pref_max_rack_size_used_for_jig[jig] = pb_metadata.rack_size[jig_initially_at] # type: ignore
+
+        if jig_name in pb_metadata.used_rack_size_vars_unloads:
+            val = struct_vars_plan_assignments.get(pb_metadata.used_rack_size_vars_unloads[jig_name], None)
+            if val is not None:
+                if jig not in pref_max_rack_size_used_for_jig: 
+                    pref_max_rack_size_used_for_jig[jig] = val
+                else:
+                    pref_max_rack_size_used_for_jig[jig] = max(val, pref_max_rack_size_used_for_jig[jig])
+
+        if jig_name in pb_metadata.used_rack_size_vars_gets:
+            val = struct_vars_plan_assignments.get(pb_metadata.used_rack_size_vars_gets[jig_name], None)
+            if val is not None:
+                if jig not in pref_max_rack_size_used_for_jig: 
+                    pref_max_rack_size_used_for_jig[jig] = val
+                else:
+                    pref_max_rack_size_used_for_jig[jig] = max(val, pref_max_rack_size_used_for_jig[jig])
+
+        for id_swap in pb_metadata.used_rack_size_vars_swaps:
+            jig_var_swap = pb_metadata.jig_vars_swaps[id_swap]
+            if jig_var_swap in struct_vars_plan_assignments and struct_vars_plan_assignments[jig_var_swap] == jig_name:
+                val = struct_vars_plan_assignments.get(jig_var_swap, None)
+                if val is not None:
+                    if jig_name not in pref_max_rack_size_used_for_jig: 
+                        pref_max_rack_size_used_for_jig[jig] = val
+                    else:
+                        pref_max_rack_size_used_for_jig[jig] = max(val, pref_max_rack_size_used_for_jig[jig])
+
+    # always jigs of same type on rack
+
+    pref_jig_types_on_rack = {}
+
+    for rack in pb_metadata.pb_def.racks:
+        rack_name = rack.name
+        rack = pb.object(rack_name)
+        pref_jig_types_on_rack.setdefault(rack, set())
+
+        initial_jig_type_on_rack: JigType | None = None # None when no jig initially on the rack
+        for j in pb_metadata.pb_def.jigs:
+            jig_name = j.name
+            jig = pb.object(jig_name)
+            jig_initially_at_rack = (pb.explicit_initial_values[pb.fluent("at")(jig)].object() == rack if pb.fluent("at")(jig) in pb.explicit_initial_values else False)
+            if jig_initially_at_rack:
+                initial_jig_type_on_rack = pb_metadata.pb_def.get_jig_type(pb_metadata.pb_def.get_jig(jig_name).type)
+                if initial_jig_type_on_rack is not None:
+                    pref_jig_types_on_rack[rack].add(initial_jig_type_on_rack.name)
+
+    for jig_name, rack_var in pb_metadata.rack_vars_unloads.items():
+        if rack_var in struct_vars_plan_assignments:
+            rack = struct_vars_plan_assignments[rack_var]
+            pref_jig_types_on_rack[rack].add(pb_metadata.pb_def.get_jig_type(pb_metadata.pb_def.get_jig(jig_name).type).name)
+
+    for jig_name, rack_var in pb_metadata.rack_vars_gets.items():
+        if rack_var in struct_vars_plan_assignments:
+            rack = struct_vars_plan_assignments[rack_var]
+            pref_jig_types_on_rack[rack].add(pb_metadata.pb_def.get_jig_type(pb_metadata.pb_def.get_jig(jig_name).type).name)
+
+    for id_swap, rack_var in pb_metadata.rack2_vars_swaps.items():
+        if rack_var in struct_vars_plan_assignments:
+            rack = struct_vars_plan_assignments[rack_var]
+            jig_name = struct_vars_plan_assignments[pb_metadata.jig_vars_swaps[id_swap]].name # type: ignore
+            pref_jig_types_on_rack[rack].add(pb_metadata.pb_def.get_jig_type(pb_metadata.pb_def.get_jig(jig_name).type).name)
+
+    pref_always_jigs_of_same_type_on_rack = { rack: True if len(jt) <= 1 else False for rack, jt in pref_jig_types_on_rack.items() }
+
+    # rack always empty
+
+    pref_rack_always_empty = {}
     
-    def add_loading(flight_number: int):
-        flight = instance.flights[flight_number]
-        beluga = p.object(flight.name)
-        
-        prev = None
-        for i, jig_type_name in enumerate(flight.outgoing):
-            jig_type = jig_types[jig_type_name]
-            
-            # add tasks to load to beluga
-            jig = p.task_network.add_variable(f"jig_{flight.name}_{i}", jig_type)
-            rack = p.task_network.add_variable(f"r_{flight.name}_{i}", rack_type)
-            trailer = p.task_network.add_variable(f"t_{flight.name}_{i}", trailer_type)
+    for rack in pb_metadata.pb_def.racks:
+        rack = pb.object(rack.name)
+        if rack not in pref_always_jigs_of_same_type_on_rack or len(pref_jig_types_on_rack[rack]) == 0:
+            pref_rack_always_empty[rack] = True
+        else:
+            pref_rack_always_empty[rack] = False
 
-            t1 = p.task_network.add_subtask(pick_up_jig_from_rack, jig, trailer, rack, beluga_side, production_side)
-            t2 = p.task_network.add_subtask(load_jig_from_trailer_to_beluga, jig, beluga, trailer)
-            
-            p.task_network.set_ordered(t1, t2)
+    # at least one rack always empty
 
-            if flight_number > 0:
-                p.task_network.add_constraint(LT(epochs[flight_number].end, t1.start))
-            if flight_number < len(instance.flights)-1:
-                p.task_network.add_constraint(LT(t2.end, epochs[flight_number+1].start))
+    pref_at_least_one_rack_always_empty = True in pref_rack_always_empty.values()
 
-            if prev is not None:
-                p.task_network.add_constraint(LT(t2.start, prev.start))
-            prev = t2
+    # # #
 
-    for i in range(len(instance.flights)):
-        add_unloading(i)
-        add_loading(i)
+    all_non_swap_subtasks_not_required_by_plan=list(set(pb_metadata.pb_all_non_swap_subtasks).difference(struct_map_plan_action_to_subtask_inv.keys()))
+
+    pbb = pb.clone()
+    pbb.epsilon = 1
+
+    struct_constrs = _make_plan_structural_constraints(
+        struct_vars_plan_assignments,
+        struct_map_plan_action_to_subtask,
+        all_non_swap_subtasks_not_required_by_plan,
+    )
+    for c in struct_constrs:
+        pbb.task_network.add_constraint(c)
+
+    pll = solve_problem(pbb)
+
+    # putdown delay (full jigs)
+
+    pref_putdown_full_delay = {}
+
+    for (unload_st, putdown_st) in pb_metadata.pb_all_unloads:
+        (t1, unload_a) = [(t, a) for (t, a, d) in pll.action_plan.timed_actions if a == pll.decomposition.subtasks[unload_st.identifier]][0]
+        (t2, putdown_a) = [(t, a) for (t, a, d) in pll.action_plan.timed_actions if a == pll.decomposition.subtasks[putdown_st.identifier]][0]
+        jig = putdown_a.actual_parameters[0].object()
+        pref_putdown_full_delay[jig] = (t2 - t1).numerator # WARNING we allow ourselves to do this because we ensure epsilon = 1
     
-    for pline in instance.production_lines:
-        
-        pline_obj = p.object(pline.name)
+    # putdown delay (empty jigs)
+
+    pref_putdown_empty_delay = {}
+
+    for (get_st, putdown_st) in pb_metadata.pb_all_gets:
+        (t1, get_a) = [(t, a) for (t, a, d) in pll.action_plan.timed_actions if a == pll.decomposition.subtasks[get_st.identifier]][0]
+        (t2, putdown_a) = [(t, a) for (t, a, d) in pll.action_plan.timed_actions if a == pll.decomposition.subtasks[putdown_st.identifier]][0]
+        # do not include jigs that are not required to be brought back in the reference plan ?
+        if putdown_st.parameters[2].parameter() in struct_vars_plan_assignments:
+            jig = putdown_a.actual_parameters[0].object()
+            pref_putdown_empty_delay[jig] = (t2 - t1).numerator # WARNING we allow ourselves to do this because we ensure epsilon = 1
+    
+    # # #
+
+    # print(at_least_one_rack_always_empty)
+    # print(rack_always_empty)
+    # print(always_jigs_of_same_type_on_rack)
+    # print(max_rack_size_used_for_jig)
+    # print(putdown_full_delay)
+    # print(putdown_empty_delay)
+
+    ##### End #####
+
+    return BelugaPlanProblemMatching(
+        struct_vars_plan_assignments,
+        struct_map_plan_action_to_subtask,
+        struct_map_plan_action_to_subtask_inv,
+        pref_at_least_one_rack_always_empty,
+        pref_rack_always_empty,
+        # pref_always_jigs_of_same_type_on_rack,
+        pref_max_rack_size_used_for_jig,
+        pref_putdown_full_delay,
+        pref_putdown_empty_delay,
+        all_non_swap_subtasks_not_required_by_plan,
+    )
+
+def make_plan_structural_constraints(
+    plan_problem_matching: BelugaPlanProblemMatching
+) -> list[up.BoolExpression]:
+    return _make_plan_structural_constraints(
+        plan_problem_matching.struct_vars_plan_assignments,
+        plan_problem_matching.struct_map_plan_action_to_subtask,
+        plan_problem_matching.all_non_swap_subtasks_not_required_by_plan
+    )
+
+def _make_plan_structural_constraints(
+    struct_vars_plan_assignments,
+    struct_map_plan_action_to_subtask,
+    all_non_swap_subtasks_not_required_by_plan,
+) -> list[up.BoolExpression]:
+
+    def make_total_order_constraints():
+        constrs = []
         prev = None
-        for i, jig_name in enumerate(pline.schedule):
-            jig = p.object(jig_name)
-   
-            # add tasks to load to production line
-            rack = p.task_network.add_variable(f"r_{jig_name}_2", rack_type)
-            trailer = p.task_network.add_variable(f"t_{jig_name}_2", trailer_type)
-            hangar = p.task_network.add_variable(f"h_{jig_name}_2", hangar_type)
-            
-            t_send1 = p.task_network.add_subtask(pick_up_jig_from_rack, jig, trailer, rack, production_side, beluga_side)
-            t_send2 = p.task_network.add_subtask(deliver_jig_to_hangar, jig, hangar, trailer, pline_obj)
+        for _, v in sorted(struct_map_plan_action_to_subtask.items()):
+            if isinstance(v, up_htn.Subtask):
+                st: up_htn.Subtask = v
+                if prev is not None:
+                    constrs.append(up.LT(prev, st.start)) # FIXME LE/LT?
+                prev = st.start
+            elif isinstance(v, tuple):
+                st: up_htn.Subtask = v[1]
+                if prev is not None:
+                    if v[0] == False:
+                        constrs.append(up.LT(prev, st.start)) # FIXME LE/LT?
+                        prev = st.start
+                    else:
+                        constrs.append(up.LT(prev, st.parameters[8].parameter()))
+                        prev = st.parameters[9].parameter()
+            else:
+                assert False
+        
+        # Force actions that were not required by the reference plan (whose analysed structure we use in this function) to be after all the required ones.
+        # This could be the case of actions that retrieve an empty jig to the beluga side, even though the jig does not need to be loaded into an outgoing Beluga.
+        # Our model forces these actions to be there, but they are not required in the reference plans given to us.
+        for st in all_non_swap_subtasks_not_required_by_plan:
+            constrs.append(up.LT(prev, st.start))
 
-            p.task_network.set_ordered(t_send1, t_send2)
-
-            # add tasks to retrieve empty jig from hangar
-            rack = p.task_network.add_variable(f"r_return_{jig_name}_2", rack_type)
-            trailer = p.task_network.add_variable(f"t_return_{jig_name}_2", trailer_type)
-
-            t_retrieve1 = p.task_network.add_subtask(get_jig_from_hangar, jig, hangar, trailer)
-            t_retrieve2 = p.task_network.add_subtask(put_down_jig_on_rack, jig, trailer, rack, production_side, beluga_side)
-
-            p.task_network.set_ordered(t_retrieve1, t_retrieve2)
-            
-            p.task_network.add_constraint(LT(t_send2.end, t_retrieve1.start))
-
-            if prev is not None:
-                p.task_network.add_constraint(LT(prev.end, t_send2.end))
-            prev = t_send2
-
-    return p
+        return constrs
+    
+    constrs = make_total_order_constraints()
+    for var, val in struct_vars_plan_assignments.items():
+        if var.type == up.BoolType():
+            constrs.append(var if val == up.TRUE() else up.Not(var))
+        else:
+            constrs.append(up.Equals(var, val))
+    
+    return constrs
+    
 
 if __name__ == "__main__":
     file = 'instances/problem_j4_r3_oc50_f4_s0_3_.json'
