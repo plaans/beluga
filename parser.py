@@ -1,11 +1,7 @@
-
-
 from dataclasses import dataclass
-import json
 from types import SimpleNamespace
-from types import *
 
-
+import json
 
 @dataclass 
 class JigType:
@@ -49,14 +45,39 @@ class BelugaProblemDef:
 
     def get_jig_type(self, name: str) -> JigType:
         return next(x for x in self.jig_types if x.name == name)
-    
 
     def get_jig(self, name: str) -> Jig:
         return next(x for x in self.jigs if x.name == name)
 
+@dataclass 
+class BelugaPlanAction:
+    name: str
+    params: dict[str, str]
 
-def parse(d) -> BelugaProblemDef:
-    p = BelugaProblemDef(
+class BelugaPlanDef(list[BelugaPlanAction]):
+    pass
+
+def parse_problem_and_plan(filename: str) -> tuple[BelugaProblemDef, BelugaPlanDef | None]:
+    with open(filename) as f:
+        d = json.load(f, object_hook=lambda d: SimpleNamespace(**d))
+    pb_def = _parse_problem(d.instance)
+    plan_def = _parse_plan(d.plan) if hasattr(d, 'plan') and d.plan != ['UNSAT'] else None
+    return (pb_def, plan_def)
+
+def parse_problem(filename: str) -> BelugaProblemDef:
+    with open(filename) as f:
+        d = json.load(f, object_hook=lambda d: SimpleNamespace(**d))
+    pb_def = _parse_problem(d.instance)
+    return pb_def
+
+def parse_plan(filename: str) -> list[BelugaPlanAction] | None:
+    with open(filename) as f:
+        d = json.load(f, object_hook=lambda d: SimpleNamespace(**d))
+    plan_def = _parse_plan(d.plan) if hasattr(d, 'plan') and d.plan != ['UNSAT'] else None
+    return plan_def
+
+def _parse_problem(d) -> BelugaProblemDef:
+    pb_def = BelugaProblemDef(
         trailers_beluga=[t.name for t in d.trailers_beluga],
         trailers_factory=[t.name for t in d.trailers_factory],
         hangars=[h for h in d.hangars],
@@ -66,24 +87,20 @@ def parse(d) -> BelugaProblemDef:
         production_lines=[ProductionLine(r.name, r.schedule) for r in d.production_lines],
         flights=[Flight(r.name, r.incoming, r.outgoing) for r in d.flights],
     )
-    return p
+    return pb_def
 
-def parse_file(filename: str):
-    with open(filename) as f:
-        d = json.load(f, object_hook=lambda d: SimpleNamespace(**d))
-    return parse(d)
-
-
+def _parse_plan(d_plan) -> BelugaPlanDef:
+    plan_def = BelugaPlanDef()
+    for a in d_plan:
+        name = a.name
+        params = { k:v for (k,v) in vars(a).items() if k != 'name' }
+        plan_def += [BelugaPlanAction(name, params)]
+    return plan_def
 
 if __name__ == "__main__":
-    file = 'instances/problem_j4_r3_oc50_f4_s0_3_.json'
-    pb = parse_file(file)
-    print(pb)
-
-
-
-# data = '{"name": "John Smith", "hometown": {"name": "New York", "id": 123}}'
-
-# # Parse JSON into an object with attributes corresponding to dict keys.
-# x = json.loads(data, object_hook=lambda d: SimpleNamespace(**d))
-# print(x.name, x.hometown.name, x.hometown.id)
+    filename = 'instances/example_sat_questions116.json'
+    (pb_def, plan_def) = parse_problem_and_plan(filename)
+    print("---- Parsed problem ----")
+    print(pb_def)
+    print("---- Parsed plan ----")
+    print(plan_def)
