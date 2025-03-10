@@ -1,6 +1,3 @@
-from unified_planning.shortcuts import *
-from unified_planning.model.htn import *
-
 import sys
 
 import unified_planning.shortcuts as up
@@ -1139,15 +1136,380 @@ def _make_plan_structural_constraints(
     
     return constrs
     
+def apply_plan_structural_constraints_to_problem(
+    pb: up_htn.HierarchicalProblem,
+    plan_problem_matching: BelugaPlanProblemMatching
+):
+    constrs = make_plan_structural_constraints(plan_problem_matching)
+    for c in constrs:
+        pb.task_network.add_constraint(c)
+
+def reify_conjunction_of_plan_structural_constraints(
+    pb: up_htn.HierarchicalProblem,
+    plan_problem_matching: BelugaPlanProblemMatching
+) -> up.Parameter:
+    if "is_ref_plan" in pb.task_network._variables:
+        is_ref_plan = pb.task_network.parameter("is_ref_plan")
+    else:
+        is_ref_plan = pb.task_network.add_variable("is_ref_plan", up.BoolType())
+    constrs = make_plan_structural_constraints(plan_problem_matching)
+    pb.task_network.add_constraint(
+        up.Or(
+            up.And(is_ref_plan, up.And(constrs)),
+            up.And(up.Not(is_ref_plan), up.Not(up.And(constrs))),
+        )
+    )
+    return is_ref_plan
+
+def reify_satisfaction_of_ref_plan_prefs_in_problem(
+    pb: up_htn.HierarchicalProblem,
+    pb_metadata: BelugaProblemMetadata,
+    plan_pb_matching: BelugaPlanProblemMatching,
+):# -> tuple[
+#    up.Parameter,
+#    dict[up.Object, up.Parameter],
+#    dict[up.Object, up.Parameter],
+#    dict[up.Object, up.Parameter],
+#    up.Parameter, 
+#    up.Parameter,
+#]:
+
+    def reify_at_least_one_rack_always_empty() -> up.Parameter:
+
+        if "at_least_one_rack_always_empty" in pb.task_network._variables:
+            at_least_one_rack_always_empty = pb.task_network.parameter("at_least_one_rack_always_empty")
+        else:
+            at_least_one_rack_always_empty = pb.task_network.add_variable("at_least_one_rack_always_empty", up.BoolType())
+
+        rack_always_empty_list = []
+        for rack in pb_metadata.pb_def.racks:
+            rack_always_empty_list.append(reify_rack_always_empty(rack.name))
+
+        pb.task_network.add_constraint(
+            up.Or(
+                up.And(at_least_one_rack_always_empty, up.Or([r_always_empty for r_always_empty in rack_always_empty_list])),
+                up.And(up.Not(at_least_one_rack_always_empty), up.And([up.Not(r_always_empty) for r_always_empty in rack_always_empty_list])),
+            )
+        )
+        return at_least_one_rack_always_empty
+
+    def reify_rack_always_empty(rack_name:str) -> up.Parameter:
+
+        all_rack_putdown_vars = list(pb_metadata.rack_vars_unloads.values())
+        all_rack_putdown_vars += list(pb_metadata.rack_vars_gets.values())
+        all_rack_putdown_vars += list(pb_metadata.rack2_vars_swaps.values())
+
+        rack_initially_empty = up.Bool(pb_metadata.rack_free_space_init[pb.object(rack_name)] == pb_metadata.rack_size[pb.object(rack_name)])
+
+        if f"{rack_name}_always_empty" in pb.task_network._variables:
+            r_always_empty = pb.task_network.parameter(f"{rack_name}_always_empty",)
+        else:
+            r_always_empty = pb.task_network.add_variable(f"{rack_name}_always_empty", up.BoolType())
+
+        pb.task_network.add_constraint(
+            up.Or(
+                up.And(up.Not(r_always_empty), up.Or([up.Not(rack_initially_empty)]+[up.Equals(var_, pb.object(rack_name)) for var_ in all_rack_putdown_vars])),
+                up.And(r_always_empty, up.And([rack_initially_empty]+[up.Not(up.Equals(var_, pb.object(rack_name))) for var_ in all_rack_putdown_vars])),
+            )
+        )
+        return r_always_empty
+
+#    def expr_always_jigs_of_same_type_on_rack(self, pb: up_htn.HierarchicalProblem, rack_name:str) -> tuple[up.Parameter, up.BoolExpression]:
+#        if f"{rack_name}_always_has_same_type_jigs" in pb.task_network._variables:
+#            rack_always_has_same_type_jigs = pb.task_network.parameter(f"{rack_name}_always_has_same_type_jigs",)
+#        else:
+#            rack_always_has_same_type_jigs = pb.task_network.add_variable(f"{rack_name}_always_has_same_type_jigs", up.BoolType())
+#
+#        rack = pb.object(rack_name)
+#
+#        reference_jig: up.Object | None = None
+#
+#        initial_jig_type_on_rack: JigType | None = None # None when no jig initially on the rack
+#        for j in self.pb_def.jigs:
+#            jig_name = j.name
+#            jig = pb.object(jig_name)
+#            jig_initially_at_rack = (pb.explicit_initial_values[pb.fluent("at")(jig)].object() == rack if pb.fluent("at")(jig) in pb.explicit_initial_values else False)
+#
+#            if jig_initially_at_rack:
+#                if initial_jig_type_on_rack is None:
+#                    initial_jig_type_on_rack = self.pb_def.get_jig_type(self.pb_def.get_jig(jig_name).type)
+#                    reference_jig = jig
+#
+#                elif initial_jig_type_on_rack.name != self.pb_def.get_jig_type(self.pb_def.get_jig(jig_name).type):
+#                    #pb.task_network.add_constraint(up.Not(rack_always_has_same_type_jigs))
+#                    #return rack_always_has_same_type_jigs
+#                    return rack_always_has_same_type_jigs, up.FALSE()
+#
+#        all_rack_putdown_vars = list(self.rack_vars_unloads.items())
+#        all_rack_putdown_vars += list(self.rack_vars_gets.items())
+#        all_rack_putdown_vars += list(self.rack2_vars_swaps.items())
+#
+#        conjs = []
+#
+#        for k1, rack1_var in all_rack_putdown_vars:
+#            for k2, rack2_var in all_rack_putdown_vars:
+#                if rack1_var == rack2_var:
+#                    continue
+#
+#                #disjs = [up.Not(up.Equals(rack1_var, rack)), up.Not(up.Equals(rack2_var, rack))]
+#
+#                if isinstance(k1, str): # i.e. r1 in rack_vars_unloads or rack_vars_gets (r1 is the jig name in string)
+#                    jig1 = pb.object(k1)
+#                else:
+#                    assert isinstance(k1, int) # swap id
+#                    jig1 = self.jig_vars_swaps[k1]
+#                if isinstance(k2, str): # i.e. r2 in rack_vars_unloads or rack_vars_gets (r2 is the jig name in string)
+#                    jig2 = pb.object(k2)
+#                else:
+#                    assert isinstance(k2, int) # swap id
+#                    jig2 = self.jig_vars_swaps[k2]
+#
+#                if reference_jig is not None:
+#                    disj = up.Or(
+#                        up.Not(up.Equals(rack1_var, rack)), 
+#                        up.Not(up.Equals(rack2_var, rack)),
+#                        pb.fluent("jigs_are_of_same_type")(jig1, jig2),
+#                    )
+#                else:
+#                    disj = up.Or(
+#                        up.Not(up.Equals(rack1_var, rack)), 
+#                        up.Not(up.Equals(rack2_var, rack)),
+#                        pb.fluent("jigs_are_of_same_type")(jig1, reference_jig),
+#                        pb.fluent("jigs_are_of_same_type")(jig2, reference_jig),
+#                    )
+#
+#                conjs += [up.Or(disj)]
+#
+#        #pb.task_network.add_constraint(
+#        #    up.Or(
+#        #        up.And(rack_always_has_same_type_jigs, up.And(conjs)),
+#        #        up.And(up.Not(rack_always_has_same_type_jigs), up.Not(up.And(conjs))),
+#        #    )
+#        #)
+#        #return rack_always_has_same_type_jigs
+#        return (
+#            rack_always_has_same_type_jigs,
+#            up.And(conjs),
+#        )
+
+    def reify_jig_always_placed_on_rack_shorter_or_same_size_as(jig_name:str, max_allowed_rack_size:int) -> up.Parameter:
+        terms = []
+
+        if f"{jig_name}_always_placed_on_rack_shorter_or_same_size_as" in pb.task_network._variables:
+            jig_always_placed_on_rack_shorter_or_same_size_as = pb.task_network.parameter(f"{jig_name}_always_placed_on_rack_shorter_or_same_size_as",)
+        else:
+            jig_always_placed_on_rack_shorter_or_same_size_as = pb.task_network.add_variable(f"{jig_name}_always_placed_on_rack_shorter_or_same_size_as", up.BoolType())
+
+        jig_initially_at = pb.explicit_initial_values.get(pb.fluent("at")(pb.object(jig_name)), None)
+        if jig_initially_at is not None:
+            jig_initially_at = jig_initially_at.object()
+        if jig_initially_at in pb_metadata.rack_size: # if the initial location of the jig is actually a rack
+            terms += [up.LE(pb_metadata.rack_size[jig_initially_at], max_allowed_rack_size)]
+
+        if jig_name in pb_metadata.used_rack_size_vars_unloads:
+            terms += [up.LE(pb_metadata.used_rack_size_vars_unloads[jig_name], max_allowed_rack_size)]
+        if jig_name in pb_metadata.used_rack_size_vars_gets:
+            terms += [up.LE(pb_metadata.used_rack_size_vars_gets[jig_name], max_allowed_rack_size)]
+        assert len(terms) > 0
+        
+        for id_swap in pb_metadata.used_rack_size_vars_swaps:
+            terms += [
+                up.Or(
+                    up.Not(up.Equals(pb_metadata.jig_vars_swaps[id_swap], pb.object(jig_name))),
+                    up.LE(pb_metadata.used_rack_size_vars_swaps[id_swap], max_allowed_rack_size),
+                )
+            ]
+        
+        pb.task_network.add_constraint(
+            up.Or(
+                up.And(jig_always_placed_on_rack_shorter_or_same_size_as, up.And(terms)),
+                up.And(up.Not(jig_always_placed_on_rack_shorter_or_same_size_as), up.Not(up.And(terms))),
+            )
+        )
+        return jig_always_placed_on_rack_shorter_or_same_size_as
+
+    def reify_max_delay_putdown_full_le(jig_name:str, max_allowed_delay:int) -> up.Parameter:
+        if f"{jig_name}_max_delay_putdown_full_le_{max_allowed_delay}" in pb.task_network._variables:
+            max_delay_putdown_full_le = pb.task_network.parameter(f"{jig_name}_max_delay_putdown_full_le_{max_allowed_delay}",)
+        else:
+            max_delay_putdown_full_le = pb.task_network.add_variable(f"{jig_name}_max_delay_putdown_full_le_{max_allowed_delay}", up.BoolType())
+
+        pb.task_network.add_constraint(
+            up.Or(
+                up.And(max_delay_putdown_full_le, up.LE(pb_metadata.max_putdown_delay_vars_unloads[jig_name], max_allowed_delay)),
+                up.And(up.Not(max_delay_putdown_full_le), up.GT(pb_metadata.max_putdown_delay_vars_unloads[jig_name], max_allowed_delay)),
+            )
+        )
+        return max_delay_putdown_full_le
+ 
+    def reify_max_delay_putdown_empty_le(jig_name:str, max_allowed_delay:int) -> up.Parameter:
+        if f"{jig_name}_max_delay_putdown_empty_le_{max_allowed_delay}" in pb.task_network._variables:
+            max_delay_putdown_empty_le = pb.task_network.parameter(f"{jig_name}_max_delay_putdown_empty_le_{max_allowed_delay}",)
+        else:
+            max_delay_putdown_empty_le = pb.task_network.add_variable(f"{jig_name}_max_delay_putdown_empty_le_{max_allowed_delay}", up.BoolType())
+
+        pb.task_network.add_constraint(
+            up.Or(
+                up.And(max_delay_putdown_empty_le, up.LE(pb_metadata.max_putdown_delay_vars_gets[jig_name], max_allowed_delay)),
+                up.And(up.Not(max_delay_putdown_empty_le), up.GT(pb_metadata.max_putdown_delay_vars_gets[jig_name], max_allowed_delay)),
+            )
+        )
+        return max_delay_putdown_empty_le
+
+    # # #
+
+    if "ref_plan_pref_sat_at_least_one_rack_always_empty" in pb.task_network._variables:
+        ref_plan_pref_sat_at_least_one_rack_always_empty = pb.task_network.parameter("ref_plan_pref_sat_at_least_one_rack_always_empty")
+    else:
+        ref_plan_pref_sat_at_least_one_rack_always_empty = pb.task_network.add_variable("ref_plan_pref_sat_at_least_one_rack_always_empty", up.BoolType())
+
+    iff_workaround = up.Or(
+        up.And(reify_at_least_one_rack_always_empty(), up.Bool(plan_pb_matching.pref_at_least_one_rack_always_empty)),
+        up.And(up.Not(reify_at_least_one_rack_always_empty()), up.Not(up.Bool(plan_pb_matching.pref_at_least_one_rack_always_empty))),
+    )
+    pb.task_network.add_constraint(
+        up.Or(
+            up.And(ref_plan_pref_sat_at_least_one_rack_always_empty, iff_workaround),
+            up.And(up.Not(ref_plan_pref_sat_at_least_one_rack_always_empty), up.Not(iff_workaround)),
+        )
+    )
+
+    # # #
+
+    ref_plan_pref_sat_reify_rack_always_empty: dict[up.Object, up.Parameter] = {}
+
+    for rack in plan_pb_matching.pref_rack_always_empty:
+        rack_name = rack.name
+
+        if f"ref_plan_pref_sat_reify_{rack_name}_always_empty" in pb.task_network._variables:
+            ref_plan_pref_sat_reify_rack_always_empty[rack] = pb.task_network.parameter(f"ref_plan_pref_sat_reify_{rack_name}_always_empty")
+        else:
+            ref_plan_pref_sat_reify_rack_always_empty[rack] = pb.task_network.add_variable(f"ref_plan_pref_sat_reify_{rack_name}_always_empty", up.BoolType())
+        
+        iff_workaround = up.Or(
+            up.And(reify_rack_always_empty(rack_name), up.Bool(plan_pb_matching.pref_rack_always_empty[rack])),
+            up.And(up.Not(reify_rack_always_empty(rack_name)), up.Not(up.Bool(plan_pb_matching.pref_rack_always_empty[rack]))),
+        )
+        pb.task_network.add_constraint(
+            up.Or(
+                up.And(ref_plan_pref_sat_reify_rack_always_empty[rack], iff_workaround),
+                up.And(up.Not(ref_plan_pref_sat_reify_rack_always_empty[rack]), up.Not(iff_workaround)),
+            )
+        )
+
+    # # #
+
+    ref_plan_pref_sat_jig_always_placed_on_rack_shorter_or_same_size_as: dict[up.Object, up.Parameter] = {}
+
+    for jig in plan_pb_matching.pref_max_rack_size_used_for_jig:
+        jig_name = jig.name
+
+        if f"ref_plan_pref_sat_reify_{jig_name}_always_placed_on_rack_shorter_or_same_size_as" in pb.task_network._variables:
+            ref_plan_pref_sat_jig_always_placed_on_rack_shorter_or_same_size_as[jig] = pb.task_network.parameter(f"ref_plan_pref_sat_reify_{jig_name}_always_placed_on_rack_shorter_or_same_size_as")
+        else:
+            ref_plan_pref_sat_jig_always_placed_on_rack_shorter_or_same_size_as[jig] = pb.task_network.add_variable(f"ref_plan_pref_sat_reify_{jig_name}_always_placed_on_rack_shorter_or_same_size_as", up.BoolType())
+
+        pb.task_network.add_constraint(
+            up.Or(
+                up.And(ref_plan_pref_sat_jig_always_placed_on_rack_shorter_or_same_size_as[jig],
+                       reify_jig_always_placed_on_rack_shorter_or_same_size_as(jig_name, plan_pb_matching.pref_max_rack_size_used_for_jig[jig])),
+                up.And(up.Not(ref_plan_pref_sat_jig_always_placed_on_rack_shorter_or_same_size_as[jig]),
+                       up.Not(reify_jig_always_placed_on_rack_shorter_or_same_size_as(jig_name, plan_pb_matching.pref_max_rack_size_used_for_jig[jig]))),
+            )
+        )
+
+    # # #
+
+    ref_plan_pref_sat_max_delay_putdown_full: dict[up.Object, up.Parameter] = {}
+
+    for jig in plan_pb_matching.pref_putdown_full_delay:
+        jig_name = jig.name
+
+        if f"ref_plan_pref_sat_reify_{jig_name}_max_delay_putdown_full" in pb.task_network._variables:
+            ref_plan_pref_sat_max_delay_putdown_full[jig] = pb.task_network.parameter(f"ref_plan_pref_sat_reify_{jig_name}_max_delay_putdown_full")
+        else:
+            ref_plan_pref_sat_max_delay_putdown_full[jig] = pb.task_network.add_variable(f"ref_plan_pref_sat_reify_{jig_name}_max_delay_putdown_full", up.BoolType())
+
+        pb.task_network.add_constraint(
+            up.Or(
+                up.And(ref_plan_pref_sat_max_delay_putdown_full[jig],
+                       reify_max_delay_putdown_full_le(jig_name, plan_pb_matching.pref_putdown_full_delay[jig])),
+                up.And(up.Not(ref_plan_pref_sat_max_delay_putdown_full[jig]),
+                       up.Not(reify_max_delay_putdown_full_le(jig_name, plan_pb_matching.pref_putdown_full_delay[jig]))),
+            )
+        )
+
+    # # #
+
+    ref_plan_pref_sat_max_delay_putdown_empty: dict[up.Object, up.Parameter] = {}
+
+    for jig in plan_pb_matching.pref_putdown_empty_delay:
+        jig_name = jig.name
+
+        if f"ref_plan_pref_sat_reify_{jig_name}_max_delay_putdown_empty" in pb.task_network._variables:
+            ref_plan_pref_sat_max_delay_putdown_empty[jig] = pb.task_network.parameter(f"ref_plan_pref_sat_reify_{jig_name}_max_delay_putdown_empty")
+        else:
+            ref_plan_pref_sat_max_delay_putdown_empty[jig] = pb.task_network.add_variable(f"ref_plan_pref_sat_reify_{jig_name}_max_delay_putdown_empty", up.BoolType())
+
+        pb.task_network.add_constraint(
+            up.Or(
+                up.And(ref_plan_pref_sat_max_delay_putdown_empty[jig],
+                       reify_max_delay_putdown_empty_le(jig_name, plan_pb_matching.pref_putdown_empty_delay[jig])),
+                up.And(up.Not(ref_plan_pref_sat_max_delay_putdown_empty[jig]),
+                       up.Not(reify_max_delay_putdown_empty_le(jig_name, plan_pb_matching.pref_putdown_empty_delay[jig]))),
+            )
+        )
+
+    # # #
+
+    return (
+        ref_plan_pref_sat_at_least_one_rack_always_empty,
+        ref_plan_pref_sat_reify_rack_always_empty,
+        ref_plan_pref_sat_jig_always_placed_on_rack_shorter_or_same_size_as,
+        ref_plan_pref_sat_max_delay_putdown_full,
+        ref_plan_pref_sat_max_delay_putdown_empty
+    )
 
 if __name__ == "__main__":
-    file = 'instances/problem_j4_r3_oc50_f4_s0_3_.json'
-    # file = 'instances/problem_j9_r3_oc50_f8_s0_15_.json'
-    # file = 'instances/problem_j12_r3_oc50_f7_s0_13_.json'
-    # file = 'instances/problem_j16_r10_oc50_f4_s0_46_.json'
-    pb = parse_file(file)
-    print(pb)
-    up = convert(pb, file)
-    print(up)
-    serialize(up, "/tmp/beluga.upp")
-    solve(up)
+    filename = 'instances/example_unsat_question2.json'
+#    filename = 'instances/example_sat_questions116.json'
+#    filename = 'instances/example_sat_questions56.json'
+#    filename = 'instances/example_sat_questions51.json'
+#    filename = 'instances/problem_j16_r10_oc50_f4_s0_46_.json'
+
+    (test_pb_def, test_plan_def) = parse_problem_and_plan(filename)
+#    print("---- Parsed problem ----")
+#    print(test_pb_def)
+
+    (test_pb, test_pb_metadata) = make_problem(test_pb_def, filename)
+#    print(test_pb)
+#    solve_problem(test_pb_metadata)
+
+    if test_plan_def is not None:
+#        print("---- Parsed plan ----")
+#        for i, a in enumerate(test_plan_def): # type: ignore
+#            print(i, a)
+        
+        test_plan_pb_matching = analyse_reference_plan(test_plan_def, test_pb, test_pb_metadata)
+#        print(test_plan_pb_matching.struct_vars_plan_assignments, end="\n\n")
+#        print(test_plan_pb_matching.struct_map_plan_action_to_subtask, end="\n\n")
+#        print(test_plan_pb_matching.pref_at_least_one_rack_always_empty, end="\n\n")
+#        print(test_plan_pb_matching.pref_rack_always_empty, end="\n\n")
+#        print(test_plan_pb_matching.pref_max_rack_size_used_for_jig, end="\n\n")
+#        print(test_plan_pb_matching.pref_putdown_full_delay, end="\n\n")
+#        print(test_plan_pb_matching.pref_putdown_empty_delay, end="\n\n")
+
+#        test_struct_constrs = make_plan_structural_constraints(test_plan_pb_matching)
+#        print(test_struct_constrs, end="\n\n")
+        is_ref_plan = reify_conjunction_of_plan_structural_constraints(test_pb, test_plan_pb_matching)
+
+        (
+            ref_plan_pref_sat_at_least_one_rack_always_empty,
+            ref_plan_pref_sat_reify_rack_always_empty,
+            ref_plan_pref_sat_jig_always_placed_on_rack_shorter_or_same_size_as,
+            ref_plan_pref_sat_max_delay_putdown_full,
+            ref_plan_pref_sat_max_delay_putdown_empty
+        ) = reify_satisfaction_of_ref_plan_prefs_in_problem(test_pb, test_pb_metadata, test_plan_pb_matching)
+
+    serialize_problem(test_pb, "test_pb_beluga.upp")
+    print("coucou!")
