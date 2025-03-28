@@ -57,12 +57,18 @@ class BelugaPlanAction:
 class BelugaPlanDef(list[BelugaPlanAction]):
     pass
 
-def parse_problem_and_plan(filename: str) -> tuple[BelugaProblemDef, BelugaPlanDef | None]:
+@dataclass
+class BelugaQuestion:
+    type_: str
+    params: dict[str, str]
+
+def parse_problem_and_plan_and_question(filename: str) -> tuple[BelugaProblemDef, BelugaPlanDef | None, BelugaQuestion]:
     with open(filename) as f:
         d = json.load(f, object_hook=lambda d: SimpleNamespace(**d))
     pb_def = _parse_problem(d.instance)
     plan_def = _parse_plan(d.plan) if hasattr(d, 'plan') and d.plan != ['UNSAT'] else None
-    return (pb_def, plan_def)
+    question = _parse_question(d.question)
+    return (pb_def, plan_def, question)
 
 def parse_problem(filename: str) -> BelugaProblemDef:
     with open(filename) as f:
@@ -97,10 +103,15 @@ def _parse_plan(d_plan) -> BelugaPlanDef:
         plan_def += [BelugaPlanAction(name, params)]
     return plan_def
 
+def _parse_question(d_qst) -> BelugaQuestion:
+    return BelugaQuestion(type_=d_qst.type, params=d_qst.parameters.__dict__ if hasattr(d_qst, "parameters") else {})
+
 if __name__ == "__main__":
     filename = 'instances/example_sat_questions116.json'
-    (pb_def, plan_def) = parse_problem_and_plan(filename)
+    (pb_def, plan_def, question) = parse_problem_and_plan_and_question(filename)
     print("---- Parsed problem ----")
     print(pb_def)
     print("---- Parsed plan ----")
     print(plan_def)
+    print("---- Parsed question ----")
+    print(question)
