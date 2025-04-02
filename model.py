@@ -3,11 +3,9 @@ import os
 
 import unified_planning.shortcuts as up
 import unified_planning.model.htn as up_htn
-import unified_planning.plot as up_plot
 
 from unified_planning.model.expression import ConstantExpression
 from unified_planning.plans.hierarchical_plan import HierarchicalPlan
-from unified_planning.exceptions import UPValueError
 
 from parser import *
 
@@ -167,6 +165,27 @@ class BelugaModel:
             self.num_available_swaps = num_swaps_used_in_ref_plan + num_available_swaps_margin
 
         self._make_htn_add_swaps()
+
+        # # #
+
+        for r in self.pb_def.racks:
+            reif_c = reify_rack_always_empty(self, r.name)
+            if r.name in self.pb_def.rack_always_empty:
+                self.pb.task_network.add_constraint(reif_c) # FIXME? do this in rust or here ?
+
+        reif_c = reify_at_least_one_rack_always_empty(self)
+        if self.pb_def.use_at_least_one_rack_always_empty:
+            self.pb.task_network.add_constraint(reif_c)
+
+        for (jig_name, rs_ub) in self.pb_def.jig_always_placed_on_rack_size_leq:
+            reif_c = reify_jig_always_placed_on_rack_shorter_or_same_size_as(self, jig_name, rs_ub)
+            self.pb.task_network.add_constraint(reif_c) # FIXME? do this in rust or here ?
+
+        if self.pb_def.val_num_swaps_used_leq is not None:
+            reif_c = reify_num_swaps_used_leq(self, self.pb_def.val_num_swaps_used_leq)
+            self.pb.task_network.add_constraint(reif_c) # FIXME? do this in rust or here ?
+
+        # !!! TODO also add all "required tasks" and "properties" to a least / use some names to be able to find them in rust ?
 
     def solve(self, timeout:float|None=None) -> tuple[HierarchicalPlan, list[dict[str, str]]]:
         pl = solve_problem(self.pb, timeout)
@@ -363,7 +382,7 @@ class BelugaModel:
 
         for beluga in self.pb_def.flights:
             beluga_obj = self.beluga_objects[beluga.name]
-            for jig_name in beluga.incoming:
+            for _, jig_name in beluga.incoming.items():
                 jig_obj = self.jig_objects[jig_name]
                 self.pb.set_initial_value(self.at(jig_obj), beluga_obj)
 
@@ -785,7 +804,7 @@ class BelugaModel:
             return None
 
         prev_unload_st = None
-        for jig_name in flights.incoming:
+        for _, jig_name in flights.incoming.items():
 
             self.unloads_rack_vars[jig_name] = self.pb.task_network.add_variable(f"r_{jig_name}_1", self.rack_type)
             self.unloads_trailer_vars[jig_name] = self.pb.task_network.add_variable(f"t_{jig_name}_1", self.trailer_type)
@@ -837,11 +856,17 @@ class BelugaModel:
 
         flight_name = flights.name
         prev_load_st = None
-        for i, jig_type_name in enumerate(flights.outgoing):
+        for i, jig_type_name in flights.outgoing.items():
 
             self.loads_jig_vars[(flights.name, i)] = self.pb.task_network.add_variable(f"jig_{flights.name}_{i}", self.jig_subtypes[jig_type_name])
             self.loads_trailer_vars[(flights.name, i)] = self.pb.task_network.add_variable(f"t_{flights.name}_{i}", self.trailer_type)
             self.loads_rack_vars[(flights.name, i)] = self.pb.task_network.add_variable(f"r_{flights.name}_{i}", self.rack_type)
+
+            if jig_type_name.startswith("jig"):
+                self.pb.task_network.add_constraint(up.Equals(self.loads_jig_vars[(flights.name, i)], self.jig_objects[jig_type_name]))
+                # FIXME TODO: ^ will have to be put in a conjunction ("and") together with the acomplishment of the task, to represent the property of achieving this spec (loading)
+            else:
+                assert jig_type_name.startswith("type")
 
             pickup_st = self.pb.task_network.add_subtask(
                 self.pickup_jig_from_rack,
@@ -864,7 +889,7 @@ class BelugaModel:
             # vvv WARNING vvv
             # if i == 0 and last_unload_before_loads is not None:
             #     self.pb.task_network.set_ordered(last_unload_before_loads, load_st)
-            # ^^^ WARNING ^^^ IN SAT45 REF PLAN, A LOAD IS PERFORMED BEFORE AN UNLOAD (IN THE SAME "EPOCH")... SO, THIS IS ALLOWED, APPARENTLY ?
+            # ^^^ WARNING ^^^ LOADS ARE ALLOWED TO BE MADE BEFORE ALL UNLOADS ARE FINISHED, SO THIS IS COMMENTED OUT
 
             self.pb.task_network.set_ordered(pickup_st, load_st)
 
@@ -880,7 +905,7 @@ class BelugaModel:
     def _make_htn_add_delivering_and_getting(self, production_line: ProductionLine):
 
         prev_deliver = None
-        for jig_name in production_line.schedule:
+        for (_, jig_name) in sorted(production_line.schedule.items()):
 
             self.delivers_trailer_vars[jig_name] = self.pb.task_network.add_variable(f"t_{jig_name}_2a", self.trailer_type)
             self.delivers_rack_vars[jig_name] = self.pb.task_network.add_variable(f"r_{jig_name}_2a", self.rack_type)
@@ -1403,6 +1428,111 @@ def reify_conjunction_of_plan_structural_constraints(
     )
     return is_ref_plan
 
+def reify_at_least_one_rack_always_empty(
+    beluga_model: BelugaModel,
+) -> up.Parameter:
+
+    if "at_least_one_rack_always_empty" in beluga_model.pb.task_network._variables:
+        at_least_one_rack_always_empty = beluga_model.pb.task_network.parameter("at_least_one_rack_always_empty")
+    else:
+        at_least_one_rack_always_empty = beluga_model.pb.task_network.add_variable("at_least_one_rack_always_empty", up.BoolType())
+
+        rack_always_empty_list = []
+        for rack in beluga_model.pb_def.racks:
+            rack_always_empty_list.append(reify_rack_always_empty(beluga_model, rack.name))
+
+        beluga_model.pb.task_network.add_constraint(
+            up.Or(
+                up.And(at_least_one_rack_always_empty, up.Or([r_always_empty for r_always_empty in rack_always_empty_list])),
+                up.And(up.Not(at_least_one_rack_always_empty), up.Not(up.Or([r_always_empty for r_always_empty in rack_always_empty_list]))),
+            )
+        )
+    return at_least_one_rack_always_empty
+
+def reify_rack_always_empty(
+    beluga_model: BelugaModel,
+    rack_name:str,
+) -> up.Parameter:
+
+    all_rack_putdown_vars = list(beluga_model.unloads_rack_vars.values())
+    all_rack_putdown_vars += list(beluga_model.gets_rack_vars.values())
+    all_rack_putdown_vars += list(beluga_model.swaps_rack2_vars.values())
+
+    rack_initially_empty = up.Bool(beluga_model.pb.explicit_initial_values[beluga_model.rack_free_space(beluga_model.rack_objects[rack_name])] == beluga_model.pb.explicit_initial_values[beluga_model.rack_size(beluga_model.rack_objects[rack_name])])
+
+    if f"{rack_name}_always_empty" in beluga_model.pb.task_network._variables:
+        r_always_empty = beluga_model.pb.task_network.parameter(f"{rack_name}_always_empty",)
+    else:
+        r_always_empty = beluga_model.pb.task_network.add_variable(f"{rack_name}_always_empty", up.BoolType())
+
+        beluga_model.pb.task_network.add_constraint(
+            up.Or(
+                up.And(up.Not(r_always_empty), up.Or([up.Not(rack_initially_empty)]+[up.Equals(var_, beluga_model.rack_objects[rack_name]) for var_ in all_rack_putdown_vars])),
+                up.And(r_always_empty, up.And([rack_initially_empty]+[up.Not(up.Equals(var_, beluga_model.rack_objects[rack_name])) for var_ in all_rack_putdown_vars])),
+            )
+        )
+    return r_always_empty
+
+def reify_jig_always_placed_on_rack_shorter_or_same_size_as(beluga_model: BelugaModel, jig_name:str, max_allowed_rack_size:int) -> up.Parameter:
+    terms = []
+
+    if f"{jig_name}_always_placed_on_rack_shorter_or_same_size_as" in beluga_model.pb.task_network._variables:
+        jig_always_placed_on_rack_shorter_or_same_size_as = beluga_model.pb.task_network.parameter(f"{jig_name}_always_placed_on_rack_shorter_or_same_size_as",)
+    else:
+        jig_always_placed_on_rack_shorter_or_same_size_as = beluga_model.pb.task_network.add_variable(f"{jig_name}_always_placed_on_rack_shorter_or_same_size_as", up.BoolType())
+
+        jig_initially_at = beluga_model.pb.explicit_initial_values.get(beluga_model.at(beluga_model.jig_objects[jig_name]), None)
+        if jig_initially_at is not None:
+            jig_initially_at = jig_initially_at.object()
+            # if the initial location of the jig is actually a rack
+            if (jig_initially_at in beluga_model.rack_objects.values()
+                and beluga_model.rack_size(jig_initially_at) in beluga_model.pb.explicit_initial_values
+            ):
+                terms += [up.LE(beluga_model.pb.explicit_initial_values[beluga_model.rack_size(jig_initially_at)], max_allowed_rack_size)]
+
+        if jig_name in beluga_model.unloads_used_rack_size_vars:
+            terms += [up.LE(beluga_model.unloads_used_rack_size_vars[jig_name], max_allowed_rack_size)]
+        if jig_name in beluga_model.gets_used_rack_size_vars:
+            terms += [up.LE(beluga_model.gets_used_rack_size_vars[jig_name], max_allowed_rack_size)]
+        assert len(terms) > 0
+        
+        for id_swap in beluga_model.swaps_used_rack_size_vars:
+            terms += [
+                up.Or(
+                    up.Not(up.Equals(beluga_model.swaps_jig_vars[id_swap], beluga_model.jig_objects[jig_name])),
+                    up.LE(beluga_model.swaps_used_rack_size_vars[id_swap], max_allowed_rack_size),
+                )
+            ]
+        
+        beluga_model.pb.task_network.add_constraint(
+            up.Or(
+                up.And(jig_always_placed_on_rack_shorter_or_same_size_as, up.And(terms)),
+                up.And(up.Not(jig_always_placed_on_rack_shorter_or_same_size_as), up.Not(up.And(terms))),
+            )
+        )
+
+    return jig_always_placed_on_rack_shorter_or_same_size_as
+
+def reify_num_swaps_used_leq(
+    beluga_model: BelugaModel,
+    val: int,
+) -> up.Parameter:
+
+    if f"num_swaps_used_leq_{val}" in beluga_model.pb.task_network._variables:
+        num_swaps_used_leq_val = beluga_model.pb.task_network.parameter(f"num_swaps_used_leq_{val}")
+    else:
+        num_swaps_used_leq_val = beluga_model.pb.task_network.add_variable(f"num_swaps_used_leq_{val}", up.BoolType())
+
+        beluga_model.pb.task_network.add_constraint(
+            up.Or(
+                up.And(num_swaps_used_leq_val,
+                        up.LE(beluga_model.num_used_swaps, val)),
+                up.And(up.Not(num_swaps_used_leq_val),
+                        up.GT(beluga_model.num_used_swaps, val)),
+            )
+        )
+    return num_swaps_used_leq_val
+""" 
 def reify_satisfaction_of_ref_plan_prefs_in_problem(
     beluga_model: BelugaModel,
     plan_pb_matching: BelugaPlanProblemMatching,
@@ -1414,124 +1544,6 @@ def reify_satisfaction_of_ref_plan_prefs_in_problem(
 #    up.Parameter, 
 #    up.Parameter,
 #]:
-
-    def reify_at_least_one_rack_always_empty() -> up.Parameter:
-
-        if "at_least_one_rack_always_empty" in beluga_model.pb.task_network._variables:
-            at_least_one_rack_always_empty = beluga_model.pb.task_network.parameter("at_least_one_rack_always_empty")
-        else:
-            at_least_one_rack_always_empty = beluga_model.pb.task_network.add_variable("at_least_one_rack_always_empty", up.BoolType())
-
-            rack_always_empty_list = []
-            for rack in beluga_model.pb_def.racks:
-                rack_always_empty_list.append(reify_rack_always_empty(rack.name))
-
-            beluga_model.pb.task_network.add_constraint(
-                up.Or(
-                    up.And(at_least_one_rack_always_empty, up.Or([r_always_empty for r_always_empty in rack_always_empty_list])),
-                    up.And(up.Not(at_least_one_rack_always_empty), up.Not(up.Or([r_always_empty for r_always_empty in rack_always_empty_list]))),
-                )
-            )
-        return at_least_one_rack_always_empty
-
-    def reify_rack_always_empty(rack_name:str) -> up.Parameter:
-
-        all_rack_putdown_vars = list(beluga_model.unloads_rack_vars.values())
-        all_rack_putdown_vars += list(beluga_model.gets_rack_vars.values())
-        all_rack_putdown_vars += list(beluga_model.swaps_rack2_vars.values())
-
-        rack_initially_empty = up.Bool(beluga_model.pb.explicit_initial_values[beluga_model.rack_free_space(beluga_model.rack_objects[rack_name])] == beluga_model.pb.explicit_initial_values[beluga_model.rack_size(beluga_model.rack_objects[rack_name])])
-
-        if f"{rack_name}_always_empty" in beluga_model.pb.task_network._variables:
-            r_always_empty = beluga_model.pb.task_network.parameter(f"{rack_name}_always_empty",)
-        else:
-            r_always_empty = beluga_model.pb.task_network.add_variable(f"{rack_name}_always_empty", up.BoolType())
-
-            beluga_model.pb.task_network.add_constraint(
-                up.Or(
-                    up.And(up.Not(r_always_empty), up.Or([up.Not(rack_initially_empty)]+[up.Equals(var_, beluga_model.rack_objects[rack_name]) for var_ in all_rack_putdown_vars])),
-                    up.And(r_always_empty, up.And([rack_initially_empty]+[up.Not(up.Equals(var_, beluga_model.rack_objects[rack_name])) for var_ in all_rack_putdown_vars])),
-                )
-            )
-        return r_always_empty
-
-#    def expr_always_jigs_of_same_type_on_rack(self, pb: up_htn.HierarchicalProblem, rack_name:str) -> tuple[up.Parameter, up.BoolExpression]:
-#        if f"{rack_name}_always_has_same_type_jigs" in pb.task_network._variables:
-#            rack_always_has_same_type_jigs = pb.task_network.parameter(f"{rack_name}_always_has_same_type_jigs",)
-#        else:
-#            rack_always_has_same_type_jigs = pb.task_network.add_variable(f"{rack_name}_always_has_same_type_jigs", up.BoolType())
-#
-#        rack = pb.object(rack_name)
-#
-#        reference_jig: up.Object | None = None
-#
-#        initial_jig_type_on_rack: JigType | None = None # None when no jig initially on the rack
-#        for j in self.pb_def.jigs:
-#            jig_name = j.name
-#            jig = pb.object(jig_name)
-#            jig_initially_at_rack = (pb.explicit_initial_values[pb.fluent("at")(jig)].object() == rack if pb.fluent("at")(jig) in pb.explicit_initial_values else False)
-#
-#            if jig_initially_at_rack:
-#                if initial_jig_type_on_rack is None:
-#                    initial_jig_type_on_rack = self.pb_def.get_jig_type(self.pb_def.get_jig(jig_name).type)
-#                    reference_jig = jig
-#
-#                elif initial_jig_type_on_rack.name != self.pb_def.get_jig_type(self.pb_def.get_jig(jig_name).type):
-#                    #pb.task_network.add_constraint(up.Not(rack_always_has_same_type_jigs))
-#                    #return rack_always_has_same_type_jigs
-#                    return rack_always_has_same_type_jigs, up.FALSE()
-#
-#        all_rack_putdown_vars = list(self.rack_vars_unloads.items())
-#        all_rack_putdown_vars += list(self.rack_vars_gets.items())
-#        all_rack_putdown_vars += list(self.rack2_vars_swaps.items())
-#
-#        conjs = []
-#
-#        for k1, rack1_var in all_rack_putdown_vars:
-#            for k2, rack2_var in all_rack_putdown_vars:
-#                if rack1_var == rack2_var:
-#                    continue
-#
-#                #disjs = [up.Not(up.Equals(rack1_var, rack)), up.Not(up.Equals(rack2_var, rack))]
-#
-#                if isinstance(k1, str): # i.e. r1 in rack_vars_unloads or rack_vars_gets (r1 is the jig name in string)
-#                    jig1 = pb.object(k1)
-#                else:
-#                    assert isinstance(k1, int) # swap id
-#                    jig1 = self.jig_vars_swaps[k1]
-#                if isinstance(k2, str): # i.e. r2 in rack_vars_unloads or rack_vars_gets (r2 is the jig name in string)
-#                    jig2 = pb.object(k2)
-#                else:
-#                    assert isinstance(k2, int) # swap id
-#                    jig2 = self.jig_vars_swaps[k2]
-#
-#                if reference_jig is not None:
-#                    disj = up.Or(
-#                        up.Not(up.Equals(rack1_var, rack)), 
-#                        up.Not(up.Equals(rack2_var, rack)),
-#                        pb.fluent("jigs_are_of_same_type")(jig1, jig2),
-#                    )
-#                else:
-#                    disj = up.Or(
-#                        up.Not(up.Equals(rack1_var, rack)), 
-#                        up.Not(up.Equals(rack2_var, rack)),
-#                        pb.fluent("jigs_are_of_same_type")(jig1, reference_jig),
-#                        pb.fluent("jigs_are_of_same_type")(jig2, reference_jig),
-#                    )
-#
-#                conjs += [up.Or(disj)]
-#
-#        #pb.task_network.add_constraint(
-#        #    up.Or(
-#        #        up.And(rack_always_has_same_type_jigs, up.And(conjs)),
-#        #        up.And(up.Not(rack_always_has_same_type_jigs), up.Not(up.And(conjs))),
-#        #    )
-#        #)
-#        #return rack_always_has_same_type_jigs
-#        return (
-#            rack_always_has_same_type_jigs,
-#            up.And(conjs),
-#        )
 
     def reify_jig_always_placed_on_rack_shorter_or_same_size_as(jig_name:str, max_allowed_rack_size:int) -> up.Parameter:
         terms = []
@@ -1609,8 +1621,8 @@ def reify_satisfaction_of_ref_plan_prefs_in_problem(
         ref_plan_pref_sat_at_least_one_rack_always_empty = beluga_model.pb.task_network.add_variable("ref_plan_pref_sat_at_least_one_rack_always_empty", up.BoolType())
 
         iff_workaround = up.Or(
-            up.And(reify_at_least_one_rack_always_empty(), up.Bool(plan_pb_matching.pref_at_least_one_rack_always_empty)),
-            up.And(up.Not(reify_at_least_one_rack_always_empty()), up.Not(up.Bool(plan_pb_matching.pref_at_least_one_rack_always_empty))),
+            up.And(reify_at_least_one_rack_always_empty(beluga_model), up.Bool(plan_pb_matching.pref_at_least_one_rack_always_empty)),
+            up.And(up.Not(reify_at_least_one_rack_always_empty(beluga_model)), up.Not(up.Bool(plan_pb_matching.pref_at_least_one_rack_always_empty))),
         )
         beluga_model.pb.task_network.add_constraint(
             up.Or(
@@ -1632,8 +1644,8 @@ def reify_satisfaction_of_ref_plan_prefs_in_problem(
             ref_plan_pref_sat_reify_rack_always_empty[rack] = beluga_model.pb.task_network.add_variable(f"ref_plan_pref_sat_{rack_name}_always_empty", up.BoolType())
         
             iff_workaround = up.Or(
-                up.And(reify_rack_always_empty(rack_name), up.Bool(plan_pb_matching.pref_rack_always_empty[rack])),
-                up.And(up.Not(reify_rack_always_empty(rack_name)), up.Not(up.Bool(plan_pb_matching.pref_rack_always_empty[rack]))),
+                up.And(reify_rack_always_empty(beluga_model, rack_name), up.Bool(plan_pb_matching.pref_rack_always_empty[rack])),
+                up.And(up.Not(reify_rack_always_empty(beluga_model, rack_name)), up.Not(up.Bool(plan_pb_matching.pref_rack_always_empty[rack]))),
             )
             beluga_model.pb.task_network.add_constraint(
                 up.Or(
@@ -1732,198 +1744,4 @@ def reify_satisfaction_of_ref_plan_prefs_in_problem(
         ref_plan_pref_sat_max_delay_putdown_empty,
         ref_plan_pref_sat_num_used_swaps_leq,
     )
-
-def prepare_addressing_question_rack_choice(
-    question: BelugaQuestion,
-    beluga_model: BelugaModel,
-    plan_pb_matching: BelugaPlanProblemMatching,
-):
-    jig_name = question.params["jig_id"]
-    rack_a_name = question.params["rack_a"]
-    rack_b_name = question.params["rack_b"]
-
-    involved_rack_vars_names = []
-
-    rack_var_unload = beluga_model.unloads_rack_vars[jig_name]
-    if plan_pb_matching.struct_vars_plan_assignments[rack_var_unload] == beluga_model.rack_objects[rack_a_name]:
-        involved_rack_vars_names.append(rack_var_unload.name)
-
-    rack_var_get = beluga_model.gets_rack_vars[jig_name]
-    if rack_var_get in plan_pb_matching.struct_vars_plan_assignments:
-        if plan_pb_matching.struct_vars_plan_assignments[rack_var_get] == beluga_model.rack_objects[rack_a_name]:
-            involved_rack_vars_names.append(rack_var_get.name)
-
-    for (id_val, rack_var_swap) in beluga_model.swaps_rack2_vars.items():
-        jig_var = beluga_model.swaps_jig_vars[id_val]
-        if jig_var in plan_pb_matching.struct_vars_plan_assignments:
-            if plan_pb_matching.struct_vars_plan_assignments[jig_var] == beluga_model.jig_objects[jig_name]:
-                if plan_pb_matching.struct_vars_plan_assignments[rack_var_swap] == beluga_model.rack_objects[rack_a_name]:
-                    involved_rack_vars_names.append(rack_var_swap.name)
-    
-    return (jig_name, rack_a_name, rack_b_name) + tuple(involved_rack_vars_names)
-
-def prepare_addressing_question_jig_to_rack_order(
-    question: BelugaQuestion,
-    beluga_model: BelugaModel,
-    plan_pb_matching: BelugaPlanProblemMatching,
-):
-    jig_x_name = question.params["jig_x_id"]
-    jig_y_name = question.params["jig_y_id"]
-    rack_c_name = question.params["rack_c"]
-    rack_d_name = question.params["rack_d"]
-
-    # WARNING! These could actually reference a putdown action indirectly / implicitly,
-    #          in the case of a swap. (If one of these refers to the id of a swap action,
-    #          it should actually be understood as the putdown part of that swap).
-    putdown_x_on_c_id_str = None
-    putdown_x_on_c_is_part_of_swap = None
-    putdown_y_on_d_id_str = None
-    putdown_y_on_d_is_part_of_swap = None
-    rack_c_var_name = None
-    rack_d_var_name = None
-
-    for (_, putdown) in beluga_model.all_unloads:
-        if putdown.parameters[0].object() == beluga_model.jig_objects[jig_x_name]:
-            if plan_pb_matching.struct_vars_plan_assignments[putdown.parameters[2].parameter()] == beluga_model.rack_objects[rack_c_name]:
-                putdown_x_on_c_id_str = putdown.identifier
-                rack_c_var_name = beluga_model.unloads_rack_vars[jig_x_name].name
-                break
-    for (_, putdown) in beluga_model.all_gets:
-        if putdown.parameters[0].object() == beluga_model.jig_objects[jig_x_name]:
-            if plan_pb_matching.struct_vars_plan_assignments[putdown.parameters[2].parameter()] == beluga_model.rack_objects[rack_c_name]:
-                putdown_x_on_c_id_str = putdown.identifier
-                rack_c_var_name = beluga_model.gets_rack_vars[jig_x_name].name
-                break
-    for (i, swap) in enumerate(beluga_model.all_swaps):
-        is_noop = plan_pb_matching.struct_vars_plan_assignments[swap.parameters[0].parameter()]
-        if is_noop == up.FALSE:
-            if plan_pb_matching.struct_vars_plan_assignments[swap.parameters[2].parameter()] == beluga_model.jig_objects[jig_x_name]:
-                if plan_pb_matching.struct_vars_plan_assignments[swap.parameters[4].parameter()] == beluga_model.rack_objects[rack_c_name]:
-                    putdown_x_on_c_id_str = swap.identifier
-                    rack_c_var_name = beluga_model.swaps_rack2_vars[i].name
-                    break
-    assert putdown_x_on_c_id_str is not None
-    assert putdown_x_on_c_is_part_of_swap is not None
-    assert rack_c_var_name is not None
-
-    for (_, putdown) in beluga_model.all_unloads:
-        if putdown.parameters[0].object() == beluga_model.jig_objects[jig_y_name]:
-            if plan_pb_matching.struct_vars_plan_assignments[putdown.parameters[2].parameter()] == beluga_model.rack_objects[rack_d_name]:
-                putdown_y_on_d_id_str = putdown.identifier
-                rack_d_var_name = beluga_model.unloads_rack_vars[jig_y_name].name
-                break
-    for (_, putdown) in beluga_model.all_gets:
-        if putdown.parameters[0].object() == beluga_model.jig_objects[jig_y_name]:
-            if plan_pb_matching.struct_vars_plan_assignments[putdown.parameters[2].parameter()] == beluga_model.rack_objects[rack_d_name]:
-                putdown_y_on_d_id_str = putdown.identifier
-                rack_d_var_name = beluga_model.gets_rack_vars[jig_y_name].name
-                break
-    for (i, swap) in enumerate(beluga_model.all_swaps):
-        is_noop = plan_pb_matching.struct_vars_plan_assignments[swap.parameters[0].parameter()]
-        if is_noop == up.FALSE:
-            if plan_pb_matching.struct_vars_plan_assignments[swap.parameters[2].parameter()] == beluga_model.jig_objects[jig_y_name]:
-                if plan_pb_matching.struct_vars_plan_assignments[swap.parameters[4].parameter()] == beluga_model.rack_objects[rack_d_name]:
-                    putdown_y_on_d_id_str = swap.identifier
-                    rack_d_var_name = beluga_model.swaps_rack2_vars[i].name
-                    break
-    assert putdown_y_on_d_id_str is not None
-    assert putdown_y_on_d_is_part_of_swap is not None
-    assert rack_d_var_name is not None
-
-    print(putdown_x_on_c_id_str, putdown_x_on_c_is_part_of_swap, putdown_y_on_d_id_str, putdown_y_on_d_is_part_of_swap, rack_c_var_name, rack_d_var_name)
-
-
-if __name__ == "__main__":
-#    json_filename = '../instances/example_sat_questions56.json'
-#    json_filename = '../instances/example_unsat_question9.json'
-
-#    json_filename = '../instances/example_sat_questions6.json'
-    json_filename = '../instances/example_sat_questions45.json'
-#    json_filename = '../instances/example_sat_questions116.json'
-#    json_filename = '../instances/example_sat_questions56.json'
-#    json_filename = '../instances/example_sat_questions51.json'
-#    json_filename = '../instances/example_sat_questions50.json'
-
-#    json_filename = '../instances/example_sat_questions45.json'
-
-#    json_filename = '../instances/example_sat_questions29.json'
-#    json_filename = '../instances/example_sat_questions138.json'
-#    json_filename = '../instances/example_sat_questions69.json' # WARNING MORE THAN 50 SWAPS IN THE REF PLAN...!!!!!!...?
-#    json_filename = '../instances/example_sat_questions13.json' # NEED 20 < N <= 30 SWAPS !! (12 minutes solving time...)
-#    json_filename = '../instances/problem_j16_r10_oc50_f4_s0_46_.json'
-
-    (test_pb_def, test_plan_def, question) = parse_problem_and_plan_and_question(json_filename)
-    # print("---- Parsed problem ----")
-    # print(test_pb_def)
-
-    test_beluga_model = BelugaModel(test_pb_def, json_filename, 3, test_plan_def)
-#    print(test_beluga_model.pb)
-#    serialize_problem(test_beluga_model.pb, "./test.upp")
-#    (test_plan, test_plan_as_json) = test_beluga_model.solve()
-#    if test_plan is not None:
-#        up_plot.plot_time_triggered_plan(test_plan.action_plan, figsize=(26.0, 16.0))
-#        assert len(test_plan_as_json) > 0
-#        print(test_plan_as_json)
-
-    if test_plan_def is not None:
-        
-        test_plan_pb_matching = analyse_reference_plan(test_plan_def, test_beluga_model)
-
-        is_ref_plan = reify_conjunction_of_plan_structural_constraints(test_beluga_model.pb, test_plan_pb_matching)
-
-        (
-            ref_plan_pref_sat_at_least_one_rack_always_empty,
-            ref_plan_pref_sat_reify_rack_always_empty,
-            ref_plan_pref_sat_jig_always_placed_on_rack_shorter_or_same_size_as,
-            ref_plan_pref_sat_max_delay_putdown_full,
-            ref_plan_pref_sat_max_delay_putdown_empty,
-            ref_plan_pref_sat_num_used_swaps_leq,
-        ) = reify_satisfaction_of_ref_plan_prefs_in_problem(test_beluga_model, test_plan_pb_matching)
-
-    # print(test_beluga_model.pb)
-    # print(question)
-
-    if question.type_ == "WHY_INFEASIBLE":
-        args = ()
-
-    elif question.type_ == "RACK_CHOICE":
-        args = prepare_addressing_question_rack_choice(question, test_beluga_model, test_plan_pb_matching)
-
-    elif question.type_ == "JIG_TO_RACK_ORDER" or question.type_ == "JIG_TO_RACK_ORDER_WHYNOT":
-        args = prepare_addressing_question_jig_to_rack_order(question, test_beluga_model, test_plan_pb_matching)
-
-    elif question.type_ == "REDUCE_NUMBER_SWAPS":
-        pass
-
-    elif question.type_ == "RACK_REMOVAL_IMPACT":
-        pass
-
-    elif question.type_ == "KEEP_EMPTY":
-        pass
-
-    else:
-        assert False
-
-    instance_name = json_filename[json_filename.rfind('/')+1:json_filename.rfind('.')]
-    print("instance name: ", instance_name)
-
-    # upp_filename = "test_pb_beluga.upp"
-    upp_filename = "upps/" + instance_name + ".upp"
-    serialize_problem(test_beluga_model.pb, upp_filename)
-
-    args = (os.path.abspath(upp_filename), question.type_) + args # type: ignore
-
-    args_filename = "upps/args/" + instance_name + ".txt"
-    os.makedirs(os.path.dirname(args_filename), exist_ok=True)
-    with open(args_filename, "w") as file:
-        file.write(" ".join([str(arg) for arg in args]))
-
-    ## TODO call the "beluga explain" command (rust binary) with these args
-    #import subprocess
-    #popen = subprocess.Popen(("beluga explain",) + args, stdout=subprocess.PIPE)
-    #popen.wait()
-    #output = popen.stdout.read() # type: ignore
-    #print(output)
-
-# TODO: need to "find" all rack variables / put actions for jig "j" that are assigned to rack "r_a".
-# Indeed, not all put actions for jig "j" could be on rack "r_a" ! The ref_query & ctr_query must be w.r.t. to these variables
+ """
