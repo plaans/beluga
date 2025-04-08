@@ -1,9 +1,11 @@
 from unified_planning.shortcuts import *
 from unified_planning.model.htn import *
+from unified_planning.model.scheduling import *
 
 import sys
 
 from parser import *
+CNT = 0
 
 
 def serialize(pb: Problem, filename: str):
@@ -15,7 +17,7 @@ def serialize(pb: Problem, filename: str):
 
 # def deserialize(filename: str) -> Problem:
 #     from unified_planning.grpc.proto_reader import ProtobufReader
-#     import unified_planning.grpc.generated.unified_planning_pb2 as proto  
+#     import unified_planning.grpc.generated.unified_planning_pb2 as proto
 
 #     with open(filename, "rb") as file:
 #         content = file.read()
@@ -32,13 +34,13 @@ def solve(pb: Problem):
         print(result)
 
 
-def convert(instance: BelugaProblemDef, name: str) -> Problem:
+def convert(instance: BelugaProblemDef, name: str) -> SchedulingProblem:
     num_trucks_beluga = len(instance.trailers_beluga)
     num_trucks_production = len(instance.trailers_factory)
 
 
-    p = HierarchicalProblem(name)
-    
+    p = SchedulingProblem(name)
+
     side_type = UserType("Side")
     beluga_side = p.add_object("beluga_side", side_type)
     production_side = p.add_object("production_side", side_type)
@@ -51,7 +53,7 @@ def convert(instance: BelugaProblemDef, name: str) -> Problem:
     for jt in instance.jig_types:
         sub_type = UserType(jt.name, jig_type)
         jig_types[jt.name] = sub_type
-        
+
     size = p.add_fluent("size", IntType(), part=jig_type)
     # size_empty = p.add_fluent("size_empty", IntType(), part=jig_type)
     # size_loaded = p.add_fluent("size_loaded", IntType(), part=jig_type)
@@ -70,7 +72,7 @@ def convert(instance: BelugaProblemDef, name: str) -> Problem:
     pos = p.add_fluent("pos", IntType(), p=jig_type, s=side_type)
 
 
-    
+
     belugas = {}
     for beluga in instance.flights:
         b = p.add_object(beluga.name, beluga_type)
@@ -101,70 +103,144 @@ def convert(instance: BelugaProblemDef, name: str) -> Problem:
         truck = p.add_object(trailer, truck_type)
         p.set_initial_value(truck_side(truck), production_side)
 
-    def load_to_trailer(a: DurativeAction, jig, trailer, side):
+    def load_to_trailer(a: Activity, jig, trailer, side):
         a.add_condition(StartTiming(), Equals(truck_side(trailer), side))
-        a.add_decrease_effect(StartTiming(), free_trucks(side), 1)
-        a.add_effect(StartTiming(), at(jig), trailer)
+        a.add_decrease_effect(StartTiming()+1, free_trucks(side), 1)
+        a.add_effect(StartTiming()+1, at(jig), trailer)
         a.add_condition(StartTiming(), available(trailer))
-        a.add_effect(StartTiming(), available(trailer), False)
+        a.add_effect(StartTiming()+1, available(trailer), False)
 
-    def unload_from_trailer(a: DurativeAction, jig, trailer, side):
+    def unload_from_trailer(a: Activity, jig, trailer, side):
         a.add_condition(StartTiming(), Equals(truck_side(trailer), side))
-        a.add_increase_effect(EndTiming(), free_trucks(side), 1)
-        a.add_effect(EndTiming(), available(trailer), True)
+        a.add_increase_effect(EndTiming()+1, free_trucks(side), 1)
+        a.add_effect(EndTiming()+1, available(trailer), True)
 
-    def to_rack(a: DurativeAction, jig, rack, trailer, side, oside):
+    def to_rack(a: Activity, jig, rack, trailer, side, oside):
         unload_from_trailer(a, jig, trailer, side)
-        a.add_decrease_effect(EndTiming(), free(rack), size(jig))
-        a.add_increase_effect(EndTiming(), next(rack, side), 1)
+        a.add_decrease_effect(EndTiming()+1, free(rack), size(jig))
+        a.add_increase_effect(EndTiming()+1, next(rack, side), 1)
 
-        a.add_effect(EndTiming(), at(jig), rack)
-        a.add_effect(EndTiming(), pos(jig, side), next(rack, side) + 1)
-        a.add_effect(EndTiming(), pos(jig, oside), -next(rack, side))
+        a.add_effect(EndTiming()+1, at(jig), rack)
+        a.add_effect(EndTiming()+1, pos(jig, side), next(rack, side) + 1)
+        a.add_effect(EndTiming()+1, pos(jig, oside), -next(rack, side))
 
-    def from_rack(a: DurativeAction, jig, rack, trailer, side, oside):
+    def from_rack(a: Activity, jig, rack, trailer, side, oside):
         a.add_condition(StartTiming(), Equals(at(jig), rack))
         a.add_condition(StartTiming(), Equals(next(rack, side), pos(jig, side)))
-        a.add_increase_effect(StartTiming(), free(rack), size(jig))
-        a.add_decrease_effect(StartTiming(), next(rack, side), 1)
+        a.add_increase_effect(StartTiming()+1, free(rack), size(jig))
+        a.add_decrease_effect(StartTiming()+1, next(rack, side), 1)
         load_to_trailer(a, jig, trailer, side)
+        pass
 
-        
+
+    def nextid() -> int:
+        global CNT
+        CNT = CNT + 1
+        return CNT
 
 
-    swap = DurativeAction("swap", p=jig_type, r1=rack_type, r2=rack_type, trailer=truck_type, side=side_type, oside=side_type)
-    swap.set_closed_duration_interval(1, 1000)
-    swap.add_condition(StartTiming(), Equals(opposite(swap.side), swap.oside))
-    from_rack(swap, swap.p, swap.r1, swap.trailer, swap.side, swap.oside)
-    to_rack(swap, swap.p, swap.r2, swap.trailer, swap.side, swap.oside)
-    p.add_action(swap)
+    # swap = DurativeAction("swap", p=jig_type, r1=rack_type, r2=rack_type, trailer=truck_type, side=side_type, oside=side_type)
+    # swap.set_closed_duration_interval(1, 1000)
+    # swap.add_condition(StartTiming(), Equals(opposite(swap.side), swap.oside))
+    # from_rack(swap, swap.p, swap.r1, swap.trailer, swap.side, swap.oside)
+    # to_rack(swap, swap.p, swap.r2, swap.trailer, swap.side, swap.oside)
+    # p.add_action(swap)
+    def add_swap(pb: SchedulingProblem, i: int) -> Activity:
+        a = pb.add_activity(f"swap-{i}", optional=True)
+        a.set_duration_bounds(1, 1000)
+        a.add_parameter("jig", jig_type)
+        a.add_parameter("rack1", rack_type)
+        a.add_parameter("rack2", rack_type)
+        a.add_parameter("trailer", truck_type)
+        a.add_parameter("side", side_type)
+        a.add_parameter("oside", side_type)
+        a.add_constraint(Equals(opposite(a.side), a.oside))
+        from_rack(a, a.jig, a.rack1, a.trailer, a.side, a.oside)
+        to_rack(a, a.jig, a.rack2, a.trailer, a.side, a.oside)
+        return a
 
-    unload = DurativeAction("unload", jig=jig_type, beluga=beluga_type, rack=rack_type, trailer=truck_type)
-    unload.set_closed_duration_interval(1, 1000)
-    to_rack(unload, unload.jig, unload.rack, unload.trailer, beluga_side, production_side)
-    load_to_trailer(unload, unload.jig, unload.trailer, beluga_side)
-    p.add_action(unload)
+    # unload = DurativeAction("unload", jig=jig_type, beluga=beluga_type, rack=rack_type, trailer=truck_type)
+    # unload.set_closed_duration_interval(1, 1000)
+    # to_rack(unload, unload.jig, unload.rack, unload.trailer, beluga_side, production_side)
+    # load_to_trailer(unload, unload.jig, unload.trailer, beluga_side)
+    # p.add_action(unload)
+    def add_unload(pb: SchedulingProblem, jig, beluga) -> Activity:
+        a = pb.add_activity(f"unload-{nextid()}", optional=False)
+        a.set_duration_bounds(1, 1000)
+        a.add_parameter("jig", jig_type)
+        a.add_constraint(Equals(a.jig, jig))
+        a.add_parameter("beluga", beluga_type)
+        a.add_constraint(Equals(a.beluga, beluga))
+        a.add_parameter("rack", rack_type)
+        a.add_parameter("trailer", truck_type)
+        load_to_trailer(a, a.jig, a.trailer, beluga_side)
+        to_rack(a, a.jig, a.rack, a.trailer, beluga_side, production_side)
 
-    load = DurativeAction("load", jig=jig_type, beluga=beluga_type, rack=rack_type, trailer=truck_type)
-    load.set_closed_duration_interval(1, 1000)
-    from_rack(load, load.jig, load.rack, load.trailer, beluga_side, production_side)
-    unload_from_trailer(load, load.jig, load.trailer, beluga_side)
-    p.add_action(load)
+        return a
 
-    send_prod = DurativeAction("send-prod", jig=jig_type, prod_line=production_line_type, rack=rack_type, hangar=hangar_type, trailer=truck_type)
-    send_prod.set_closed_duration_interval(1, 1000)
-    send_prod.add_condition(EndTiming(), free_hangar(send_prod.hangar))
-    send_prod.add_effect(EndTiming(), free_hangar(send_prod.hangar), False)
-    from_rack(send_prod, send_prod.jig, send_prod.rack, send_prod.trailer, production_side, beluga_side)
-    unload_from_trailer(send_prod, send_prod.jig, send_prod.trailer, production_side)
-    p.add_action(send_prod)
+    # load = DurativeAction("load", jig=jig_type, beluga=beluga_type, rack=rack_type, trailer=truck_type)
+    # load.set_closed_duration_interval(1, 1000)
+    # from_rack(load, load.jig, load.rack, load.trailer, beluga_side, production_side)
+    # unload_from_trailer(load, load.jig, load.trailer, beluga_side)
+    # p.add_action(load)
+    def add_load(pb: SchedulingProblem, jig_type, beluga) -> Activity:
+        a = pb.add_activity(f"load-{nextid()}", optional=False)
+        a.set_duration_bounds(1, 1000)
+        a.add_parameter("jig", jig_type)
+        a.add_parameter("beluga", beluga_type)
+        a.add_constraint(Equals(a.beluga, beluga))
+        a.add_parameter("rack", rack_type)
+        a.add_parameter("trailer", truck_type)
+        from_rack(a, a.jig, a.rack, a.trailer, beluga_side, production_side)
+        unload_from_trailer(a, a.jig, a.trailer, beluga_side)
+        return a
 
-    retrieve_prod = DurativeAction("retrieve-prod", jig=jig_type, prod_line=production_line_type, rack=rack_type, hangar=hangar_type, trailer=truck_type)
-    retrieve_prod.set_closed_duration_interval(1, 1000)
-    retrieve_prod.add_effect(StartTiming(), free_hangar(retrieve_prod.hangar), True)
-    to_rack(retrieve_prod, retrieve_prod.jig, retrieve_prod.rack, retrieve_prod.trailer, production_side, beluga_side)
-    load_to_trailer(retrieve_prod, retrieve_prod.jig, retrieve_prod.trailer, production_side)
-    p.add_action(retrieve_prod)
+
+    # send_prod = DurativeAction("send-prod", jig=jig_type, prod_line=production_line_type, rack=rack_type, hangar=hangar_type, trailer=truck_type)
+    # send_prod.set_closed_duration_interval(1, 1000)
+    # send_prod.add_condition(EndTiming(), free_hangar(send_prod.hangar))
+    # send_prod.add_effect(EndTiming(), free_hangar(send_prod.hangar), False)
+    # from_rack(send_prod, send_prod.jig, send_prod.rack, send_prod.trailer, production_side, beluga_side)
+    # unload_from_trailer(send_prod, send_prod.jig, send_prod.trailer, production_side)
+    # p.add_action(send_prod)
+    def add_send_prod(pb: SchedulingProblem, jig, prod_line) -> Activity:
+        a = pb.add_activity(f"send-prod-{nextid()}", optional=False)
+        a.set_duration_bounds(1, 1000)
+        a.add_parameter("jig", jig_type)
+        a.add_constraint(Equals(a.jig, jig))
+        a.add_parameter("prod_line", production_line_type)
+        a.add_constraint(Equals(a.prod_line, prod_line))
+        a.add_parameter("rack", rack_type)
+        a.add_parameter("hangar", hangar_type)
+        a.add_parameter("trailer", truck_type)
+        from_rack(a, a.jig, a.rack, a.trailer, production_side, beluga_side)
+        unload_from_trailer(a, a.jig, a.trailer, production_side)
+        a.add_condition(EndTiming() -1, free_hangar(a.hangar))
+        a.add_effect(EndTiming(), free_hangar(a.hangar), False)
+        return a
+
+
+
+    # retrieve_prod = DurativeAction("retrieve-prod", jig=jig_type, prod_line=production_line_type, rack=rack_type, hangar=hangar_type, trailer=truck_type)
+    # retrieve_prod.set_closed_duration_interval(1, 1000)
+    # retrieve_prod.add_effect(StartTiming(), free_hangar(retrieve_prod.hangar), True)
+    # to_rack(retrieve_prod, retrieve_prod.jig, retrieve_prod.rack, retrieve_prod.trailer, production_side, beluga_side)
+    # load_to_trailer(retrieve_prod, retrieve_prod.jig, retrieve_prod.trailer, production_side)
+    # p.add_action(retrieve_prod)
+    def add_retrieve_prod(pb: SchedulingProblem, jig, prod_line) -> Activity:
+        a = pb.add_activity(f"retrieve-prod-{nextid()}", optional=False)
+        a.set_duration_bounds(1, 1000)
+        a.add_parameter("jig", jig_type)
+        a.add_constraint(Equals(a.jig, jig))
+        a.add_parameter("prod_line", production_line_type)
+        a.add_constraint(Equals(a.prod_line, prod_line))
+        a.add_parameter("rack", rack_type)
+        a.add_parameter("hangar", hangar_type)
+        a.add_parameter("trailer", truck_type)
+        a.add_effect(StartTiming(), free_hangar(a.hangar), True)
+        to_rack(a, a.jig, a.rack, a.trailer, production_side, beluga_side)
+        load_to_trailer(a, a.jig, a.trailer, production_side)
+        return a
 
     for jig in instance.jigs:
         part_obj = p.add_object(jig.name, jig_types[jig.type])
@@ -177,7 +253,6 @@ def convert(instance: BelugaProblemDef, name: str) -> Problem:
 
     for rack in instance.racks:
         r = p.add_object(rack.name, rack_type)
-        
 
         num_pieces = len(rack.jigs)
         occupied_space = 0
@@ -191,17 +266,20 @@ def convert(instance: BelugaProblemDef, name: str) -> Problem:
             p.set_initial_value(pos(jig, production_side), num_pieces - i)
             p.set_initial_value(at(jig), r)
         p.set_initial_value(free(r), rack.size - occupied_space)
-        p.set_initial_value(next(r, production_side), num_pieces)
+        p.set_initial_value(next(r, production_side), num_pieces)   ## Nicka suggested adding -1 but does not seem to work
 
-    proceed_to_next = InstantaneousAction("proceed_to_next_beluga")
-    p.add_action(proceed_to_next)
+
+    def new_proceed_to_next(pb: SchedulingProblem, id: int):
+      a = pb.add_activity(name=f"next-{id}")
+      return a
 
     epochs = []
     for i in range(len(instance.flights)+2):
-        t = p.task_network.add_subtask(proceed_to_next)
+        t = new_proceed_to_next(p, i)
         epochs.append(t)
         if i > 0:
-            p.task_network.add_constraint(LT(epochs[i-1].end, t.start))
+            p.add_constraint(LT(epochs[i-1].end, t.start))
+
 
     def add_unloading(flight_number: int):
         flight = instance.flights[flight_number]
@@ -211,89 +289,74 @@ def convert(instance: BelugaProblemDef, name: str) -> Problem:
         for i, jig_name in enumerate(flight.incoming):
             jig = p.object(jig_name)
 
-            # add task to unload from beluga
-            r = p.task_network.add_variable(f"r_{jig_name}_1", rack_type)
-            truck = p.task_network.add_variable(f"t_{jig_name}_1", truck_type)
-            t = p.task_network.add_subtask(unload, jig, beluga, r, truck)
-            
-            p.task_network.add_constraint(LT(epochs[flight_number].end, t.start))
-            p.task_network.add_constraint(LT(t.end, epochs[flight_number+1].start))
+            t = add_unload(p, jig, beluga)
+
+            p.add_constraint(LT(epochs[flight_number].end, t.start), scope=[t.present])
+            p.add_constraint(LT(t.end, epochs[flight_number+1].start), scope=[t.present])
 
             if prev is not None:
-                p.task_network.add_constraint(LT(t.start, prev.start))
+                p.add_constraint(LT(t.start, prev.start), scope=[prev.present, t.present])
             prev = t
 
-    
+
     def add_loading(flight_number: int):
         flight = instance.flights[flight_number]
         beluga = p.object(flight.name)
-        
+
         prev = None
         for i, jig_type_name in enumerate(flight.outgoing):
             jig_type = jig_types[jig_type_name]
-            
+
             # add task to unload from beluga
-            jig = p.task_network.add_variable(f"jig_{flight.name}_{i}", jig_type)
-            r = p.task_network.add_variable(f"r_{flight.name}_{i}", rack_type)
-            truck = p.task_network.add_variable(f"t_{flight.name}_{i}", truck_type)
-            t = p.task_network.add_subtask(load, jig, beluga, r, truck)
-            
-            p.task_network.add_constraint(LT(epochs[flight_number+1].end, t.start))
-            p.task_network.add_constraint(LT(t.end, epochs[flight_number+2].start))
+            t = add_load(p, jig_type, beluga)
+
+            p.add_constraint(LT(epochs[flight_number+1].end, t.start), scope=[t.present])
+            p.add_constraint(LT(t.end, epochs[flight_number+2].start), scope=[t.present])
 
             if prev is not None:
-                p.task_network.add_constraint(LT(t.start, prev.start))
+                p.add_constraint(LT(t.start, prev.start), scope=[prev.present, t.present])
             prev = t
 
     for i in range(len(instance.flights)):
         add_unloading(i)
         add_loading(i)
-    
+
+
     for pline in instance.production_lines:
-        
+
         pline_obj = p.object(pline.name)
         prev = None
         for i, jig_name in enumerate(pline.schedule):
             jig = p.object(jig_name)
-            # p.add_goal(Equals(at(part_obj), pline_obj))
-            # p.add_goal(Equals(pos(part_obj, production_side), i +1))
-            #  send_prod = DurativeAction("send-prod", jig=jig_type, prod_line=production_line_type, rack=rack_type, hangar=hangar_type, trailer=truck_type)
-   
 
             # add task to load to production line
-            rack = p.task_network.add_variable(f"r_{jig_name}_2", rack_type)
-            trailer = p.task_network.add_variable(f"t_{jig_name}_2", truck_type)
-            hangar = p.task_network.add_variable(f"h_{jig_name}_2", hangar_type)
-            t_send = p.task_network.add_subtask(send_prod, jig, pline_obj, rack, hangar, trailer)
-            
+            t_send = add_send_prod(p, jig, pline_obj)
+
             # add task to retrieve empty jig from hangar
-            rack = p.task_network.add_variable(f"r_return_{jig_name}_2", rack_type)
-            trailer = p.task_network.add_variable(f"t_return_{jig_name}_2", truck_type)
-            t_retrieve = p.task_network.add_subtask(retrieve_prod, jig, pline_obj, rack, hangar, trailer)
-            
-            p.task_network.add_constraint(LT(t_send.end, t_retrieve.start))
+            t_retrieve = add_retrieve_prod(p, jig, pline_obj)
+            p.add_constraint(Equals(t_send.hangar, t_retrieve.hangar), scope=[t_send.present, t_retrieve.present])
+
+            p.add_constraint(LT(t_send.end, t_retrieve.start), scope=[t_send.present, t_retrieve.present])
 
             if prev is not None:
-                p.task_network.add_constraint(LT(prev.end, t_send.end))
+                p.add_constraint(LT(prev.end, t_send.end), scope=[prev.present, t_send.present])
             prev = t_send
-        
-        
-            
-    
-    # add task to allow an arbitrary number of swaps between racks
-    do_swaps = p.add_task("do_swaps")
-    m1 = Method("m-noop")
-    m1.set_task(do_swaps)
-    p.add_method(m1)
 
-    m2 = Method("m-do-rec", p=jig_type, r1=rack_type, r2=rack_type, t=truck_type, side=side_type, oside=side_type)
-    m2.set_task(do_swaps)
-    swap_subtask = m2.add_subtask(swap, m2.p, m2.r1, m2.r2, m2.t, m2.side, m2.oside)
-    rec_subtask = m2.add_subtask(do_swaps)
-    m2.set_ordered(swap_subtask, rec_subtask)
-    p.add_method(m2)
 
-    p.task_network.add_subtask(do_swaps)
+
+
+    MAX_SWAPS = 10
+    num_swaps = p.add_variable("num_swaps", IntType(0, MAX_SWAPS))
+    prev = None
+    for i in range(1, MAX_SWAPS+1):
+        t = add_swap(p, i)
+        t.add_constraint(GE(num_swaps, i))
+        p.add_constraint(Implies(Not(t.present), LT(num_swaps, i)))
+        if prev is not None:
+            # add symmetry breaking constraint
+            p.add_constraint(Implies(t.present, prev.present))
+            p.add_constraint(LE(prev.start, t.start), scope=[prev.present, t.present])
+        prev = t
 
 
 
@@ -310,5 +373,4 @@ if __name__ == "__main__":
     up = convert(pb, file)
     print(up)
     serialize(up, "/tmp/beluga.upp")
-    # solve(up)
-
+    solve(up)
