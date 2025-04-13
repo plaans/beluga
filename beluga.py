@@ -3,12 +3,6 @@
 import sys
 import os
 
-import unified_planning.shortcuts as up
-import unified_planning.model.htn as up_htn
-
-from unified_planning.model.expression import ConstantExpression
-from unified_planning.plans.hierarchical_plan import HierarchicalPlan
-
 from parser import *
 from model import *
 
@@ -21,35 +15,73 @@ if __name__ == "__main__":
     rust_binary_path = os.path.abspath(".") # os.path.abspath(sys.path[0])
 
     if sys.argv[1] == "solve":
-        #initial_state_filename = './separated_jsons/test_instance_init_state.json'
-        #specifications_filename = './separated_jsons/test_instance_specifications.json'
-        #test_pb_def = parse_specifications_and_initial_state(initial_state_filename, specifications_filename)
 
-        full_problem_filename = sys.argv[2]
-        test_pb_def = parse_problem_full(full_problem_filename)
+        base_filename = sys.argv[2]
+        props_filename = sys.argv[3]
+        test_pb_def = parse_problem_and_properties(base_filename, props_filename)
+        print(test_pb_def)
+        # full_problem_filename = sys.argv[2]
+        # test_pb_def = parse_problem_full(full_problem_filename)
         # print(test_pb_def)
 
-        # # # # with fixed num of allowed_swaps # # # 
-        # 
-        # num_available_swaps = 3
-        # test_beluga_model = BelugaModel(test_pb_def, full_problem_filename, num_available_swaps, None)
-        # serialize_problem(test_beluga_model.pb, output_upp_path)
-        # (test_plan, test_plan_as_json) = test_beluga_model.solve()
-
+        # # # with fixed num of allowed_swaps # # # 
+        """
+        num_available_swaps = 0
+        test_beluga_model = BelugaModelOptSched(test_pb_def, base_filename+"_"+props_filename, num_available_swaps, None)
+        
+        serialize_problem(test_beluga_model.pb, output_upp_path)
+        (test_plan, test_plan_as_json) = test_beluga_model.solve_with_properties(list(test_beluga_model.properties.keys()))
+        """
+        # import subprocess
+        # popen = subprocess.Popen(
+        #     (
+        #         os.path.join(os.path.abspath(sys.path[0]), "beluga_rust"),
+        #         "solve",
+        #         output_upp_path,
+        #     ),
+        #     stdout=subprocess.PIPE,
+        # )
+        # popen.wait()
+        # output = popen.stdout.read() # type: ignore
+        # print(output)
+        
         # # # with growing num of allowed_swaps (until limit or sol found) # # # 
     
-        num_available_swaps = 2
+        """ max_num_available_swaps = int(os.environ.get('MAX_NUM_AVAILABLE_SWAPS', 10))
+        num_available_swaps = 0
         while True:
             print('available swaps "spawned": {}'.format(num_available_swaps))
         
-            test_beluga_model = BelugaModel(test_pb_def, full_problem_filename, num_available_swaps, None)
-            (test_plan, test_plan_as_json) = test_beluga_model.solve()
+            test_beluga_model = BelugaModelOptSched(test_pb_def, base_filename+"_"+props_filename, num_available_swaps, None)
+
+            (test_plan, test_plan_as_json) = test_beluga_model.solve_with_properties(list(test_beluga_model.properties.keys()))
         
             if test_plan is not None:
                 break
-            if num_available_swaps > 10: # FIXME TODO temporary
-                break                    # FIXME TODO temporary
             num_available_swaps += 1
+            if num_available_swaps >= max_num_available_swaps:   # FIXME TODO temporary ?
+                sys.exit(2)                                      # FIXME TODO temporary ?
+         """
+        # # # ALT: with growing num of allowed_swaps (until limit or sol found) # # # 
+    
+        num_available_swaps = int(os.environ.get('MAX_NUM_AVAILABLE_SWAPS', 10))
+        test_beluga_model = BelugaModelOptSched(test_pb_def, base_filename+"_"+props_filename, num_available_swaps, None)
+        serialize_problem(test_beluga_model.pb, output_upp_path)
+
+        n = 0
+        while True:
+            print('swaps "spawned": {} swaps allowed: {}'.format(num_available_swaps, n))
+        
+            (test_plan, test_plan_as_json) = test_beluga_model.solve_with_properties(
+                list(test_beluga_model.properties.keys()),
+                n
+            )
+        
+            if test_plan is not None:
+                break
+            n += 1
+            if n > num_available_swaps:   # FIXME TODO temporary ?
+                sys.exit(2)                # FIXME TODO temporary ?
 
         assert (test_plan is None and test_plan_as_json is None) or (test_plan is not None and test_plan_as_json is not None)
         print(test_plan_as_json)
@@ -59,34 +91,38 @@ if __name__ == "__main__":
             with open(output_plan_path, 'w', encoding='utf-8') as f:
                 json.dump(test_plan_as_json, f, ensure_ascii=False, indent=4)
                 sys.exit(0)
-            assert False
-        sys.exit(2)
+        assert False
+
 
     elif sys.argv[1] == "explain":
-        #initial_state_filename = './separated_jsons/test_instance_init_state.json'
-        #specifications_filename = './separated_jsons/test_instance_specifications.json'
-        #test_pb_def = parse_specifications_and_initial_state(initial_state_filename, specifications_filename)
 
-        # # # with fixed num of allowed_swaps # # # 
-
-        full_problem_filename = sys.argv[2]
-        test_pb_def = parse_problem_full(full_problem_filename)
+        base_filename = sys.argv[2]
+        props_filename = sys.argv[3]
+        test_pb_def = parse_problem_and_properties(base_filename, props_filename)
+        print(test_pb_def)
+        # full_problem_filename = sys.argv[2]
+        # test_pb_def = parse_problem_full(full_problem_filename)
         # print(test_pb_def)
 
-        num_available_swaps = 3
-        test_beluga_model = BelugaModel(test_pb_def, full_problem_filename, num_available_swaps, None)
-        serialize_problem(test_beluga_model.pb, output_upp_path)
+        num_available_swaps = int(os.environ.get('MAX_NUM_AVAILABLE_SWAPS', 10))
+        test_beluga_model = BelugaModelOptSched(test_pb_def, base_filename+"_"+props_filename, num_available_swaps, None)
+        serialize_problem(test_beluga_model.pb, output_upp_path)        
 
         import subprocess
-#        popen = subprocess.Popen((os.path.join(os.path.abspath(sys.path[0]), "beluga_rust"), "solve", output_upp_path), stdout=subprocess.PIPE)
-        popen = subprocess.Popen((os.path.join(os.path.abspath(sys.path[0]), "beluga_rust"), "explain", output_upp_path, "WHY_INFEASIBLE"), stdout=subprocess.PIPE)
+        popen = subprocess.Popen(
+            (
+                os.path.join(os.path.abspath(sys.path[0]), "beluga_rust"),
+                "explain",
+                output_upp_path,
+                "WHY_INFEASIBLE"
+            ),
+            stdout=subprocess.PIPE,
+        )
         popen.wait()
         output = popen.stdout.read() # type: ignore
         print(output)
 
-        
-
-        print("SUBCOMMAND {} NOT COMPLETELY IMPLEMENTED !".format(sys.argv[1]))
+        sys.exit(0)
 
     else:
         print("UNKNOWN (OR NOT YET IMPLEMENTED) SUBCOMMAND {}".format(sys.argv[1]))
