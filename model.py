@@ -1,23 +1,23 @@
 import sys
 import os
+from unified_planning.grpc.proto_writer import ProtobufWriter
 
 import unified_planning.shortcuts as up
-import unified_planning.model.htn as up_htn
 
-from unified_planning.model.expression import ConstantExpression
-from unified_planning.plans.hierarchical_plan import HierarchicalPlan
+from unified_planning.model.scheduling.scheduling_problem import SchedulingProblem
+from unified_planning.model.scheduling.activity import Activity
+from unified_planning.plans import Schedule
 
 from parser import *
 
 def serialize_problem(pb: up.Problem, filename: str):
-    from unified_planning.grpc.proto_writer import ProtobufWriter
     writer = ProtobufWriter()
     msg = writer.convert(pb)
     os.makedirs(os.path.dirname(filename), exist_ok=True)
     with open(filename, "wb") as file:
         file.write(msg.SerializeToString())
 
-def solve_problem(pb: up_htn.HierarchicalProblem, timeout:float|None) -> HierarchicalPlan: # type: ignore
+def solve_problem(pb: SchedulingProblem, timeout:float|None) -> Schedule: # type: ignore
     with up.OneshotPlanner(name="aries") as planner:
         result = planner.solve( # type: ignore
             pb,
@@ -27,10 +27,7 @@ def solve_problem(pb: up_htn.HierarchicalProblem, timeout:float|None) -> Hierarc
         plan = result.plan
     return plan
 
-TASK_NAME_PREFIX = "t_"
-METHOD_NAME_PREFIX = "m_"
-
-class BelugaModel:
+class BelugaModelOptSched:
 
     def __init__(
         self,
@@ -39,216 +36,267 @@ class BelugaModel:
         num_available_swaps_margin: int,
         ref_plan_def: BelugaPlanDef | None,
     ):
-        self.num_flights: int
         # # #
-        self.pb: up_htn.HierarchicalProblem
+
+        self.pb: SchedulingProblem
+        self._activities_uid_counter: int = 0
+
         # # #
+
         self.side_type: up.Type
         self.side_beluga: up.Object
         self.side_production: up.Object
         self.side_opposite: up.Fluent
+
         # # #
+
         self.jig_type: up.Type
         self.jig_subtypes: dict[str, up.Type]
         self.jig_objects: dict[str, up.Object] = {}
         self.jig_size: up.Fluent
         self.jig_size_empty: up.Fluent
         self.jig_is_empty: up.Fluent
+
         # # #
+
         self.part_location_type: up.Type
+
         # # #
+
         self.rack_type: up.Type
         self.rack_free_space: up.Fluent
         self.rack_size: up.Fluent
         self.rack_objects: dict[str, up.Object] = {}
+
         # # #
+
         self.beluga_type: up.Type
         self.beluga_objects: dict[str, up.Object] = {}
         self.beluga_current: up.Fluent
         self.beluga_next: up.Fluent
+
         # # #
+
         self.hangar_type: up.Type
         self.hangar_free: up.Fluent
         self.hangar_objects: dict[str, up.Object] = {}
+
         # # #
+
         self.production_line_type: up.Type
         self.production_line_objects: dict[str, up.Object] = {}
+
         # # #
+
         self.trailer_type: up.Type
         self.trailer_available: up.Fluent
         self.trailer_side: up.Fluent
         self.trailer_free: up.Fluent
         self.trailer_objects: dict[str, up.Object] = {}
+
         # # #
+
         self.next_: up.Fluent
         self.at: up.Fluent
         self.pos: up.Fluent
+
         # # #
-        self.proceed_to_next_flight: up.InstantaneousAction
-        self.unload_jig_from_beluga_to_trailer: up.InstantaneousAction | up.DurativeAction
-        self.load_jig_from_trailer_to_beluga: up.InstantaneousAction | up.DurativeAction
-        self.putdown_jig_on_rack: up_htn.Task
-        self.pickup_jig_from_rack: up.InstantaneousAction | up.DurativeAction
-        self.deliver_jig_to_hangar: up.InstantaneousAction | up.DurativeAction
-        self.get_jig_from_hangar: up_htn.Task
-        self.do_swap: up_htn.Task
+
+        self.num_flights: int
+
+        self.all_proceeds_to_next_flight: list[tuple[str, Activity]] = []
+        self.all_unloads_w_putdowns: dict[tuple[str, str, int], tuple[Activity, Activity]] = {}
+        self.all_loads_w_pickups: dict[tuple[str, str, int], tuple[Activity, Activity]] = {}
+        self.all_delivers_w_pickups: dict[tuple[str, str, int], tuple[Activity, Activity]] = {}
+        self.all_gets_w_putdowns: dict[str, tuple[Activity, Activity]] = {}
+        self.all_swap_pickups_n_putdowns: dict[int, tuple[Activity, Activity]] = {}
+
+        self.all_putdowns: list[Activity] = []
+        self.all_pickups: list[Activity] = []
+
         # # #
-        self.all_proceed_to_next_flight: list[up_htn.Subtask] = []
-        self.all_unloads: list[tuple[up_htn.Subtask, up_htn.Subtask]] = []
-        self.all_loads: list[tuple[up_htn.Subtask, up_htn.Subtask]] = []
-        self.all_delivers: list[tuple[up_htn.Subtask, up_htn.Subtask]] = []
-        self.all_gets: list[tuple[up_htn.Subtask, up_htn.Subtask]] = []
-        self.all_swaps: list[up_htn.Subtask] = []
-        self.all_non_swap_subtasks: list[up_htn.Subtask] = []
-        # # #
-        self.unloads_rack_vars: dict[str, up.Parameter] = {}
-        self.unloads_trailer_vars: dict[str, up.Parameter] = {}
-        self.unloads_used_rack_size_vars: dict[str, up.Parameter] = {}
-        self.unloads_max_putdown_delay_vars: dict[str, up.Parameter] = {}
-        self.unloads_is_noop_putdown_vars: dict[str, up.Parameter] = {}
-        # # #
-        self.loads_jig_vars: dict[tuple[str, int], up.Parameter] = {}
-        self.loads_trailer_vars: dict[tuple[str, int], up.Parameter] = {}
-        self.loads_rack_vars: dict[tuple[str, int], up.Parameter] = {}
-        # # #
-        self.delivers_trailer_vars: dict[str, up.Parameter] = {}
-        self.delivers_rack_vars: dict[str, up.Parameter] = {}
-        self.delivers_n_gets_hangar_vars: dict[str, up.Parameter] = {}
-        self.gets_trailer_vars: dict[str, up.Parameter] = {}
-        self.gets_rack_vars: dict[str, up.Parameter] = {}
-        self.gets_used_rack_size_vars: dict[str, up.Parameter] = {}
-        self.gets_max_putdown_delay_vars: dict[str, up.Parameter] = {}
-        self.gets_is_noop_vars: dict[str, up.Parameter] = {}
-        # # #
+
         self.num_used_swaps: up.Parameter
+
         # # #
-        self.swaps_is_noop_vars: dict[int, up.Parameter] = {}
-        #self.swaps_id_vars: dict[int, up.Parameter] = {}
-        self.swaps_jig_vars: dict[int, up.Parameter] = {}
-        self.swaps_rack1_vars: dict[int, up.Parameter] = {}
-        self.swaps_rack2_vars: dict[int, up.Parameter] = {}
-        self.swaps_trailer_vars: dict[int, up.Parameter] = {}
-        self.swaps_side_vars: dict[int, up.Parameter] = {}
-        self.swaps_used_rack_size_vars: dict[int, up.Parameter] = {}
-        self.swaps_mid_timepoint_lb_vars: dict[int, up.Parameter] = {}
-        self.swaps_mid_timepoint_ub_vars: dict[int, up.Parameter] = {}
+
+        self.properties: dict[PropId, up.Parameter] = {}
+
         # # #
 
         self.pb_def = pb_def
+        self.num_flights = len(pb_def.flights)
+
         self.num_available_swaps = num_available_swaps_margin
 
-        self.pb = up_htn.HierarchicalProblem(name)
-        self.pb.epsilon = 1 # FIXME: ?? needed to later extract the difference between two timepoints as an int ??
+        self.pb = SchedulingProblem(name)
         
         self._make_types_and_fluents_and_initial_values()
 
-        self._make_tasks_and_actions_and_methods()
-
-        self.num_flights = len(pb_def.flights)
-
-        # make htn
-
-        for flight in self.pb_def.flights[1:]:
-            proceed_st = self.pb.task_network.add_subtask(self.proceed_to_next_flight, self.beluga_objects[flight.name])
-            self.all_proceed_to_next_flight.append(proceed_st)
-        self.pb.task_network.set_ordered(*self.all_proceed_to_next_flight)
-
-        for flight_index in range(self.num_flights):
-            last_unload_before_loads = self._make_htn_add_unloading(flight_index)
-            self._make_htn_add_loading(flight_index, last_unload_before_loads)
-
-        for production_line in self.pb_def.production_lines:
-            self._make_htn_add_delivering_and_getting(production_line)
-
-        if ref_plan_def is not None:
-            num_swaps_used_in_ref_plan = self._get_number_of_swaps_in_reference_plan(ref_plan_def)
-            self.num_available_swaps = num_swaps_used_in_ref_plan + num_available_swaps_margin
-
-        self._make_htn_add_swaps()
-
         # # #
 
-        for r in self.pb_def.racks:
-            reif_c = reify_rack_always_empty(self, r.name)
-            if r.name in self.pb_def.rack_always_empty:
-                self.pb.task_network.add_constraint(reif_c) # FIXME? do this in rust or here ?
+        self._add_proceeds()
 
-        reif_c = reify_at_least_one_rack_always_empty(self)
-        if self.pb_def.use_at_least_one_rack_always_empty:
-            self.pb.task_network.add_constraint(reif_c)
+        self._add_flights_unloads_w_opt_putdowns()
+        self._add_flights_loads_w_pickups()
+        self._add_pls_deliveries_w_pickups_and_retrievals_w_opt_putdowns()
 
-        for (jig_name, rs_ub) in self.pb_def.jig_always_placed_on_rack_size_leq:
-            reif_c = reify_jig_always_placed_on_rack_shorter_or_same_size_as(self, jig_name, rs_ub)
-            self.pb.task_network.add_constraint(reif_c) # FIXME? do this in rust or here ?
+        # if ref_plan_def is not None:
+        #     # num_swaps_used_in_ref_plan = self._get_number_of_swaps_in_reference_plan(ref_plan_def)
+        #     # self.num_available_swaps = num_swaps_used_in_ref_plan + num_available_swaps_margin
+        self._add_swaps()
 
-        if self.pb_def.val_num_swaps_used_leq is not None:
-            reif_c = reify_num_swaps_used_leq(self, self.pb_def.val_num_swaps_used_leq)
-            self.pb.task_network.add_constraint(reif_c) # FIXME? do this in rust or here ?
+        self._add_trailers_initial_jigs_opt_putdowns()
+        self._add_hangars_initial_jigs_retrievals_w_opt_putdowns()
+        self._add_opt_pickup_for_each_jig_last_non_swap()
+        # # #
 
-        # !!! TODO also add all "required tasks" and "properties" to a least / use some names to be able to find them in rust ?
+        for (j_name, flight_name, i), (unload_a, _) in self.all_unloads_w_putdowns.items():
+            pres_val = up.TRUE()
+            for prop_id, (jj, bb, ii) in self.pb_def.props_unload_beluga:
+                if (j_name == jj and flight_name == bb and i == ii):
+                    self.properties[prop_id] = self.pb.add_variable(f"prop_{prop_id}_unload_{j_name}_{flight_name}_{i}", up.BoolType())
+                    pres_val = self.properties[prop_id]
+                    break
+            self.pb.add_constraint(up.Iff(unload_a.present, pres_val))
 
-    def solve(self, timeout:float|None=None) -> tuple[HierarchicalPlan, list[dict[str, str]]]:
-        pl = solve_problem(self.pb, timeout)
+        for (j_or_j_type_name, flight_name, i), (load_a, _) in self.all_loads_w_pickups.items():
+            pres_val = up.TRUE()
+            for prop_id, (jj, bb, ii) in self.pb_def.props_load_beluga:
+                if (j_or_j_type_name == jj and flight_name == bb and i == ii):
+                    self.properties[prop_id] = self.pb.add_variable(f"prop_{prop_id}_load_{j_or_j_type_name}_{flight_name}_{i}", up.BoolType())
+                    pres_val = self.properties[prop_id]
+                    break
+            self.pb.add_constraint(up.Iff(load_a.present, pres_val))
+
+        for (j_name, pl_name, i), (deliver_a, _) in self.all_delivers_w_pickups.items():
+            pres_val = up.TRUE()
+            for prop_id, (jj, pl, ii) in self.pb_def.props_deliver_to_production_line:
+                if (j_name == jj and pl_name == pl and i == ii):
+                    self.properties[prop_id] = self.pb.add_variable(f"prop_{prop_id}_deliver_{j_name}_{pl_name}_{i}", up.BoolType())
+                    pres_val = self.properties[prop_id]
+                    break
+            self.pb.add_constraint(up.Iff(deliver_a.present, pres_val))
+
+        # NOTE: On the above (^^^): all unloads/loads/delivers that correspond to properties to "reify", are reified to "prop_..." variables.
+        # NOTE: All others ones, are forced to be necessarily present !
+        assert all(prop_id in self.properties for (prop_id, _) in self.pb_def.props_unload_beluga)
+        assert all(prop_id in self.properties for (prop_id, _) in self.pb_def.props_load_beluga)
+        assert all(prop_id in self.properties for (prop_id, _) in self.pb_def.props_deliver_to_production_line)
+        """
+        for (prop_id, rack_name) in self.pb_def.props_rack_always_empty:
+            self._reify_prop_rack_always_empty(rack_name, prop_id)
+
+        if self.pb_def.prop_at_least_one_rack_always_empty is not None:
+            self._reify_prop_at_least_one_rack_always_empty(self.pb_def.prop_at_least_one_rack_always_empty)
+
+        for (prop_id, (jig_name, rs)) in self.pb_def.props_jig_always_placed_on_rack_size_leq:
+            self._reify_prop_jig_always_placed_on_rack_shorter_or_same_size_as(jig_name, rs, prop_id)
+
+        for (prop_id, ns) in self.pb_def.props_num_swaps_used_leq:
+            self._reify_prop_num_swaps_used_leq_val(ns, prop_id)
+
+        for (prop_id, (jig_name, rack_name)) in self.pb_def.props_jig_never_on_rack:
+            self._reify_prop_jig_never_on_rack(jig_name, rack_name, prop_id)
+
+        for (prop_id, (jig_name, rack_name)) in self.pb_def.props_jig_only_if_ever_on_rack:
+            self._reify_prop_jig_only_if_ever_on_rack(jig_name, rack_name, prop_id)
+
+        for (prop_id, (jig1_name, pl1_name, jig2_name, pl2_name)) in self.pb_def.props_jig_to_production_line_order:
+            self._reify_prop_jig_to_production_line_order(jig1_name, pl1_name, jig2_name, pl2_name, prop_id)
+
+        for (prop_id, (jig1_name, rack1_name, jig2_name, rack2_name)) in self.pb_def.props_jig_to_rack_order:
+            self._reify_prop_jig_to_rack_order(jig1_name, rack1_name, jig2_name, rack2_name, prop_id)
+
+        for (prop_id, (jig_name, pl_name, flight_name)) in self.pb_def.props_jig_to_production_line_before_flight:
+            self._reify_prop_jig_to_production_line_before_flight(jig_name, pl_name, flight_name, prop_id)
+        """
+    def solve_with_properties(
+        self,
+        prop_ids: list[PropId],
+        num_swaps_to_use: int | None=None,
+        timeout:float|None=None,
+    ) -> tuple[Schedule, list[dict[str, str]]]:
+        
+        pb = self.pb.clone()
+
+        if num_swaps_to_use is not None:
+            pb.add_constraint(up.Equals(self.num_used_swaps, num_swaps_to_use)) # or also GE ? LE ? -> All have different pros/cons (depending on the situation, too...!..?)
+
+        for prop_id in prop_ids:
+            pb.add_constraint(self.properties[prop_id])
+
+##        prop_ids_yes = ["id00","id01","id02","id03","id04","id05","id06","id07","id08","id09","id10"]
+#        prop_ids_yes = ["id00","id01","id02","id03","id04","id06","id07","id08","id10"]
+#        prop_ids_no = ["id05","id09"]
+##        prop_ids_yes = ["id01","id02","id03","id04","id05","id06","id07"]
+##        prop_ids_no = ["id00"]
+#        for prop_id in prop_ids_yes:
+#            pb.add_constraint(self.properties[prop_id])
+#        for prop_id in prop_ids_no:
+#            pb.add_constraint(up.Not(self.properties[prop_id]))
+
+        pl = solve_problem(pb, timeout)
 
         pl_as_json = []
 
         if pl is not None:
-            for (_, a, _) in pl.action_plan.timed_actions:
-                if a.action == self.unload_jig_from_beluga_to_trailer:
+            for a in pl.activities:
+                if a.name.startswith("unload_beluga"):
                     aa = { 
-                        "name": a.action.name,
-                        "j": a.actual_parameters[0].object().name,
-                        "b": a.actual_parameters[1].object().name,
-                        "t": a.actual_parameters[2].object().name,
+                        "name": a.name[:a.name.find(self._get_activity_uid_prefix())],
+                        "j": pl.assignment[a.get_parameter("j")].object().name,
+                        "b": pl.assignment[a.get_parameter("b")].object().name,
+                        "t": pl.assignment[a.get_parameter("t")].object().name,
                     }
-                elif a.action == self.load_jig_from_trailer_to_beluga:
+                elif a.name.startswith("load_beluga"):
                     aa = { 
-                        "name": a.action.name,
-                        "j": a.actual_parameters[0].object().name,
-                        "b": a.actual_parameters[1].object().name,
-                        "t": a.actual_parameters[2].object().name,
+                        "name": a.name[:a.name.find(self._get_activity_uid_prefix())],
+                        "j": pl.assignment[a.get_parameter("j")].object().name,
+                        "b": pl.assignment[a.get_parameter("b")].object().name,
+                        "t": pl.assignment[a.get_parameter("t")].object().name,
                     }
-                elif a.action == self.do_putdown_jig_on_rack:
+                elif a.name.startswith("put_down_rack"):
                     aa = { 
-                        "name": a.action.name,
-                        "j": a.actual_parameters[0].object().name,
-                        "t": a.actual_parameters[1].object().name,
-                        "r": a.actual_parameters[2].object().name,
-                        "s": a.actual_parameters[3].object().name,
+                        "name": a.name[:a.name.find(self._get_activity_uid_prefix())],
+                        "j": pl.assignment[a.get_parameter("j")].object().name,
+                        "t": pl.assignment[a.get_parameter("t")].object().name,
+                        "r": pl.assignment[a.get_parameter("r")].object().name,
+                        "s": pl.assignment[a.get_parameter("s")].object().name,
                     }
-                elif a.action == self.pickup_jig_from_rack:
+                elif a.name.startswith("pick_up_rack"):
                     aa = { 
-                        "name": a.action.name,
-                        "j": a.actual_parameters[0].object().name,
-                        "t": a.actual_parameters[1].object().name,
-                        "r": a.actual_parameters[2].object().name,
-                        "s": a.actual_parameters[3].object().name,
+                        "name": a.name[:a.name.find(self._get_activity_uid_prefix())],
+                        "j": pl.assignment[a.get_parameter("j")].object().name,
+                        "t": pl.assignment[a.get_parameter("t")].object().name,
+                        "r": pl.assignment[a.get_parameter("r")].object().name,
+                        "s": pl.assignment[a.get_parameter("s")].object().name,
                     }
-                elif a.action == self.deliver_jig_to_hangar:
+                elif a.name.startswith("deliver_to_hangar"):
                     aa = { 
-                        "name": a.action.name,
-                        "j": a.actual_parameters[0].object().name,
-                        "h": a.actual_parameters[1].object().name,
-                        "t": a.actual_parameters[2].object().name,
-                        "pl": a.actual_parameters[3].object().name,
+                        "name": a.name[:a.name.find(self._get_activity_uid_prefix())],
+                        "j": pl.assignment[a.get_parameter("j")].object().name,
+                        "h": pl.assignment[a.get_parameter("h")].object().name,
+                        "t": pl.assignment[a.get_parameter("t")].object().name,
+                        "pl": pl.assignment[a.get_parameter("pl")].object().name,
                     }
-                elif a.action == self.do_get_jig_from_hangar:
+                elif a.name.startswith("get_from_hangar"):
                     aa = { 
-                        "name": a.action.name,
-                        "j": a.actual_parameters[0].object().name,
-                        "h": a.actual_parameters[1].object().name,
-                        "t": a.actual_parameters[2].object().name,
+                        "name": a.name[:a.name.find(self._get_activity_uid_prefix())],
+                        "j": pl.assignment[a.get_parameter("j")].object().name,
+                        "h": pl.assignment[a.get_parameter("h")].object().name,
+                        "t": pl.assignment[a.get_parameter("t")].object().name,
                     }
-                elif a.action == self.proceed_to_next_flight:
+                elif a.name.startswith("switch_to_next_beluga"):
                     aa = { 
-                        "name": a.action.name,
+                        "name": a.name[:a.name.find(self._get_activity_uid_prefix())],
                     }
                 else:
                     assert False
                 
                 pl_as_json.append(aa)
 
-        return (pl, pl_as_json)
+        return (pl, pl_as_json)        
 
     def _make_types_and_fluents_and_initial_values(self):
 
@@ -279,11 +327,6 @@ class BelugaModel:
             self.pb.set_initial_value(self.jig_is_empty(jig_obj), up.Bool(jig.empty))
             self.jig_objects[jig.name] = jig_obj
 
-    #    jigs_are_of_same_type = pb.add_fluent("jigs_are_of_same_type", up.BoolType(), j1=jig_type, j2=jig_type)
-    #    for jig1 in pb_def.jigs:
-    #        for jig2 in pb_def.jigs:
-    #            pb.set_initial_value(jigs_are_of_same_type(pb.object(jig1.name), pb.object(jig2.name)), up.Bool(jig1.type == jig2.type))
-
         # # #
 
         self.part_location_type = up.UserType("PartLoc")
@@ -313,10 +356,14 @@ class BelugaModel:
 
         self.hangar_type = up.UserType("Hangar", father=self.part_location_type)
         self.hangar_free = self.pb.add_fluent("free_hangar", up.BoolType(), h=self.hangar_type)
-        for hangar_name in self.pb_def.hangars:
-            hangar_obj = self.pb.add_object(hangar_name, self.hangar_type)
+        for hangar in self.pb_def.hangars:
+            hangar_obj = self.pb.add_object(hangar.name, self.hangar_type)
             self.pb.set_initial_value(self.hangar_free(hangar_obj), True)
-            self.hangar_objects[hangar_name] = hangar_obj
+            self.hangar_objects[hangar.name] = hangar_obj
+            if hangar.jig is not None:
+                jig = self.pb_def.get_jig(hangar.jig)
+                jig_obj = self.jig_objects[hangar.jig]
+                self.pb.set_initial_value(self.at(jig_obj), hangar_obj)
 
         # # #
 
@@ -339,14 +386,22 @@ class BelugaModel:
         self.pb.set_initial_value(self.trailer_free(self.side_beluga), num_trailers_beluga)
         self.pb.set_initial_value(self.trailer_free(self.side_production), num_trailers_production)
 
-        for trailer_name in self.pb_def.trailers_beluga:
-            trailer_obj = self.pb.add_object(trailer_name, self.trailer_type)
+        for trailer in self.pb_def.trailers_beluga:
+            trailer_obj = self.pb.add_object(trailer.name, self.trailer_type)
             self.pb.set_initial_value(self.trailer_side(trailer_obj), self.side_beluga)
-            self.trailer_objects[trailer_name] = trailer_obj
-        for trailer_name in self.pb_def.trailers_factory:
-            trailer_obj = self.pb.add_object(trailer_name, self.trailer_type)
+            self.trailer_objects[trailer.name] = trailer_obj
+            if trailer.jig is not None:
+                jig = self.pb_def.get_jig(trailer.jig)
+                jig_obj = self.jig_objects[trailer.jig]
+                self.pb.set_initial_value(self.at(jig_obj), trailer_obj)
+        for trailer in self.pb_def.trailers_factory:
+            trailer_obj = self.pb.add_object(trailer.name, self.trailer_type)
             self.pb.set_initial_value(self.trailer_side(trailer_obj), self.side_production)
-            self.trailer_objects[trailer_name] = trailer_obj
+            self.trailer_objects[trailer.name] = trailer_obj
+            if trailer.jig is not None:
+                jig = self.pb_def.get_jig(trailer.jig)
+                jig_obj = self.jig_objects[trailer.jig]
+                self.pb.set_initial_value(self.at(jig_obj), trailer_obj)
 
         # # #
 
@@ -386,1362 +441,742 @@ class BelugaModel:
                 jig_obj = self.jig_objects[jig_name]
                 self.pb.set_initial_value(self.at(jig_obj), beluga_obj)
 
-    def _make_tasks_and_actions_and_methods(self):
+    def _load_to_trailer(self, a: Activity, jig, trailer, side):
+        a.add_condition(up.StartTiming(), up.Equals(self.trailer_side(trailer), side))
+        a.add_condition(up.StartTiming(), self.trailer_available(trailer))
+        a.add_effect(up.EndTiming(), self.trailer_available(trailer), False)
+        a.add_effect(up.EndTiming(), self.at(jig), trailer)
 
-        # # #
+    def _unload_from_trailer(self, a: Activity, jig, trailer, side):
+        a.add_condition(up.StartTiming(), up.Equals(self.trailer_side(trailer), side))
+        a.add_condition(up.StartTiming(), up.Not(self.trailer_available(trailer))) # actually not needed ?
+        a.add_effect(up.EndTiming(), self.trailer_available(trailer), True)
+        a.add_condition(up.StartTiming(), up.Equals(self.at(jig), trailer))
 
-        def load_to_trailer(a: up.InstantaneousAction, jig, trailer, side):
-            a.add_precondition(up.Equals(self.trailer_side(trailer), side))
-            a.add_precondition(self.trailer_available(trailer))
-            a.add_effect(self.trailer_available(trailer), False)
-            a.add_effect(self.at(jig), trailer)
+    def _to_rack(self, a: Activity, jig, rack, side, oside):
+        a.add_decrease_effect(up.EndTiming(), self.rack_free_space(rack), self.jig_size(jig))
+        a.add_decrease_effect(up.EndTiming(), self.next_(rack, side), 1)
+        a.add_effect(up.EndTiming(), self.pos(jig, side), self.next_(rack, side)-1)
+        a.add_effect(up.EndTiming(), self.pos(jig, oside), -self.next_(rack, side)+1)
+        a.add_effect(up.EndTiming(), self.at(jig), rack)
+        a.add_condition(up.StartTiming(), up.Equals(oside, self.side_opposite(side)))
 
-        def unload_from_trailer(a: up.InstantaneousAction, jig, trailer, side):
-            a.add_precondition(up.Equals(self.trailer_side(trailer), side))
-            a.add_precondition(up.Not(self.trailer_available(trailer))) # actually not needed ?
-            a.add_effect(self.trailer_available(trailer), True)
-            a.add_precondition(up.Equals(self.at(jig), trailer))
+    def _from_rack(self, a: Activity, jig, rack, side, oside):
+        a.add_increase_effect(up.EndTiming(), self.rack_free_space(rack), self.jig_size(jig))
+        a.add_condition(up.StartTiming(), up.Equals(self.next_(rack, side), self.pos(jig, side)))
+        a.add_increase_effect(up.EndTiming(), self.next_(rack, side), 1)
+        a.add_condition(up.StartTiming(), up.Equals(self.at(jig), rack))
+        a.add_condition(up.StartTiming(), up.Equals(oside, self.side_opposite(side)))
 
-        def to_rack(a: up.InstantaneousAction, jig, rack, side, oside):
-            a.add_decrease_effect(self.rack_free_space(rack), self.jig_size(jig))
-            a.add_decrease_effect(self.next_(rack, side), 1)
-            a.add_effect(self.pos(jig, side), self.next_(rack, side)-1)
-            a.add_effect(self.pos(jig, oside), -self.next_(rack, side)+1)
-            a.add_effect(self.at(jig), rack)
+    def _get_activity_uid_prefix(self) -> str:
+        return "_uid"
 
-        def from_rack(a: up.InstantaneousAction, jig, rack, side, oside):
-            a.add_increase_effect(self.rack_free_space(rack), self.jig_size(jig))
-            a.add_precondition(up.Equals(self.next_(rack, side), self.pos(jig, side)))
-            a.add_increase_effect(self.next_(rack, side), 1)
-            a.add_precondition(up.Equals(self.at(jig), rack))
+    def _new_activity_uid(self) -> str:
+        res = "_uid"+str(self._activities_uid_counter)
+        self._activities_uid_counter += 1
+        return res
 
-        # # #
+    def _make_new_unload_activity(self) -> Activity:
+       
+        unload_jig_from_beluga_to_trailer = self.pb.add_activity("unload_beluga"+self._new_activity_uid(), optional=True)
+        unload_jig_from_beluga_to_trailer.add_parameter("j", self.jig_type)
+        unload_jig_from_beluga_to_trailer.add_parameter("b", self.beluga_type)
+        unload_jig_from_beluga_to_trailer.add_parameter("t", self.trailer_type)
 
-        self.unload_jig_from_beluga_to_trailer = up.InstantaneousAction(
-            "unload_beluga",
-            j=self.jig_type,
-            b=self.beluga_type,
-            t=self.trailer_type,
-        )
-        load_to_trailer(
-            self.unload_jig_from_beluga_to_trailer,
-            self.unload_jig_from_beluga_to_trailer.j,
-            self.unload_jig_from_beluga_to_trailer.t,
+        self._load_to_trailer(
+            unload_jig_from_beluga_to_trailer,
+            unload_jig_from_beluga_to_trailer.j,
+            unload_jig_from_beluga_to_trailer.t,
             self.side_beluga,
         )
-        self.unload_jig_from_beluga_to_trailer.add_precondition(
+        unload_jig_from_beluga_to_trailer.add_condition(
+            up.StartTiming(),
             up.Equals(
-                self.at(self.unload_jig_from_beluga_to_trailer.j),
-                self.unload_jig_from_beluga_to_trailer.b,
+                self.at(unload_jig_from_beluga_to_trailer.j),
+                unload_jig_from_beluga_to_trailer.b,
             ),
         )
-        self.pb.add_action(self.unload_jig_from_beluga_to_trailer)
+        return unload_jig_from_beluga_to_trailer
 
-        # # #
+    def _make_new_load_activity(self) -> Activity:
 
-        self.load_jig_from_trailer_to_beluga = up.InstantaneousAction(
-            "load_beluga",
-            j=self.jig_type,
-            b=self.beluga_type,
-            t=self.trailer_type,
-        )
-        unload_from_trailer(
-            self.load_jig_from_trailer_to_beluga,
-            self.load_jig_from_trailer_to_beluga.j,
-            self.load_jig_from_trailer_to_beluga.t,
+        load_jig_from_trailer_to_beluga = self.pb.add_activity("load_beluga"+self._new_activity_uid(), optional=True)
+        load_jig_from_trailer_to_beluga.add_parameter("j", self.jig_type)
+        load_jig_from_trailer_to_beluga.add_parameter("b", self.beluga_type)
+        load_jig_from_trailer_to_beluga.add_parameter("t", self.trailer_type)
+
+        self._unload_from_trailer(
+            load_jig_from_trailer_to_beluga,
+            load_jig_from_trailer_to_beluga.j,
+            load_jig_from_trailer_to_beluga.t,
             self.side_beluga,
         )
-        self.load_jig_from_trailer_to_beluga.add_effect(
-            self.at(self.load_jig_from_trailer_to_beluga.j),
-            self.load_jig_from_trailer_to_beluga.b,
+        load_jig_from_trailer_to_beluga.add_effect(
+            up.EndTiming(),
+            self.at(load_jig_from_trailer_to_beluga.j),
+            load_jig_from_trailer_to_beluga.b,
         )
-        self.load_jig_from_trailer_to_beluga.add_precondition(
-            self.jig_is_empty(self.load_jig_from_trailer_to_beluga.j),
+        load_jig_from_trailer_to_beluga.add_condition(
+            up.StartTiming(),
+            self.jig_is_empty(load_jig_from_trailer_to_beluga.j),
         )
-        self.pb.add_action(self.load_jig_from_trailer_to_beluga)
+        return load_jig_from_trailer_to_beluga
 
-        # # #
+    def _make_new_put_down_activity(self) -> Activity:
+        putdown_jig_on_rack = self.pb.add_activity("put_down_rack"+self._new_activity_uid(), optional=True)
+        putdown_jig_on_rack.add_parameter("j", self.jig_type)
+        putdown_jig_on_rack.add_parameter("t", self.trailer_type)
+        putdown_jig_on_rack.add_parameter("r", self.rack_type)
+        putdown_jig_on_rack.add_parameter("s", self.side_type)
+        putdown_jig_on_rack.add_parameter("os", self.side_type)
+        putdown_jig_on_rack.add_parameter("rs", up.IntType(0, 1000))
+        putdown_jig_on_rack.add_parameter("d", up.IntType(0, 1000))
 
-        self.do_putdown_jig_on_rack = up.InstantaneousAction(
-            "put_down_rack",
-            j=self.jig_type,
-            t=self.trailer_type, 
-            r=self.rack_type,
-            s=self.side_type,
-            os=self.side_type,
-            rs=up.IntType(0, 1000),
-            d=up.IntType(0, 1000),
+        self._unload_from_trailer(
+            putdown_jig_on_rack,
+            putdown_jig_on_rack.j,
+            putdown_jig_on_rack.t,
+            putdown_jig_on_rack.s,
         )
-        unload_from_trailer(
-            self.do_putdown_jig_on_rack,
-            self.do_putdown_jig_on_rack.j,
-            self.do_putdown_jig_on_rack.t,
-            self.do_putdown_jig_on_rack.s,
+        self._to_rack(
+            putdown_jig_on_rack,
+            putdown_jig_on_rack.j,
+            putdown_jig_on_rack.r,
+            putdown_jig_on_rack.s,
+            putdown_jig_on_rack.os,
         )
-        to_rack(
-            self.do_putdown_jig_on_rack,
-            self.do_putdown_jig_on_rack.j,
-            self.do_putdown_jig_on_rack.r,
-            self.do_putdown_jig_on_rack.s,
-            self.do_putdown_jig_on_rack.os,
+        putdown_jig_on_rack.add_condition(
+            up.StartTiming(),
+            up.Equals(self.rack_size(putdown_jig_on_rack.r), putdown_jig_on_rack.rs),
         )
-        self.do_putdown_jig_on_rack.add_precondition(
-            up.Equals(self.rack_size(self.do_putdown_jig_on_rack.r), self.do_putdown_jig_on_rack.rs),
-        )
-        self.pb.add_action(self.do_putdown_jig_on_rack)
+        return putdown_jig_on_rack
 
-        # # #
+    def _make_new_pick_up_activity(self) -> Activity:
+        pickup_jig_from_rack = self.pb.add_activity("pick_up_rack"+self._new_activity_uid(), optional=True)
+        pickup_jig_from_rack.add_parameter("j", self.jig_type)
+        pickup_jig_from_rack.add_parameter("t", self.trailer_type)
+        pickup_jig_from_rack.add_parameter("r", self.rack_type)
+        pickup_jig_from_rack.add_parameter("s", self.side_type)
+        pickup_jig_from_rack.add_parameter("os", self.side_type)
 
-        self.putdown_jig_on_rack = self.pb.add_task(
-            TASK_NAME_PREFIX+"put_down_rack",
-            j=self.jig_type,
-            t=self.trailer_type, 
-            r=self.rack_type,
-            s=self.side_type,
-            os=self.side_type,
-            rs=up.IntType(0, 1000),
-            d=up.IntType(0, 1000),
-            is_noop=up.BoolType(),
+        self._from_rack(
+            pickup_jig_from_rack,
+            pickup_jig_from_rack.j,
+            pickup_jig_from_rack.r,
+            pickup_jig_from_rack.s,
+            pickup_jig_from_rack.os,
         )
-        m1 = up_htn.Method(
-            METHOD_NAME_PREFIX+"put_down_rack_noop",
-            j=self.jig_type,
-            t=self.trailer_type, 
-            r=self.rack_type,
-            s=self.side_type,
-            os=self.side_type,
-            rs=up.IntType(0, 1000),
-            d=up.IntType(0, 1000),
-            is_noop=up.BoolType(),
+        self._load_to_trailer(
+            pickup_jig_from_rack,
+            pickup_jig_from_rack.j,
+            pickup_jig_from_rack.t,
+            pickup_jig_from_rack.s,
         )
-        m1.set_task(self.putdown_jig_on_rack)
-        m1.add_constraint(m1.is_noop)
-        self.pb.add_method(m1)
+        return pickup_jig_from_rack
 
-        m2 = up_htn.Method(
-            METHOD_NAME_PREFIX+"put_down_rack_do",
-            j=self.jig_type,
-            t=self.trailer_type, 
-            r=self.rack_type,
-            s=self.side_type,
-            os=self.side_type,
-            rs=up.IntType(0, 1000),
-            d=up.IntType(0, 1000),
-            is_noop=up.BoolType(),
-        )
-        m2.set_task(self.putdown_jig_on_rack)
-        m2.add_constraint(up.Not(m2.is_noop))
-        m2.add_subtask(self.do_putdown_jig_on_rack, m2.j, m2.t, m2.r, m2.s, m2.os, m2.rs, m2.d)
-        self.pb.add_method(m2)
+    def _make_new_deliver_jig_to_hangar_activity(self) -> Activity:
+        deliver_jig_to_hangar = self.pb.add_activity("deliver_to_hangar"+self._new_activity_uid(), optional=True)
+        deliver_jig_to_hangar.add_parameter("j", self.jig_type)
+        deliver_jig_to_hangar.add_parameter("h", self.hangar_type)
+        deliver_jig_to_hangar.add_parameter("t", self.trailer_type) 
+        deliver_jig_to_hangar.add_parameter("pl", self.production_line_type)
 
-        # # #
-
-        self.pickup_jig_from_rack = up.InstantaneousAction(
-            "pick_up_rack", 
-            j=self.jig_type,
-            t=self.trailer_type,
-            r=self.rack_type,
-            s=self.side_type,
-            os=self.side_type,
-        )
-        from_rack(
-            self.pickup_jig_from_rack,
-            self.pickup_jig_from_rack.j,
-            self.pickup_jig_from_rack.r,
-            self.pickup_jig_from_rack.s,
-            self.pickup_jig_from_rack.os,
-        )
-        load_to_trailer(
-            self.pickup_jig_from_rack,
-            self.pickup_jig_from_rack.j,
-            self.pickup_jig_from_rack.t,
-            self.pickup_jig_from_rack.s,
-        )
-        self.pb.add_action(self.pickup_jig_from_rack)
-
-        # # #
-
-        self.deliver_jig_to_hangar = up.InstantaneousAction(
-            "deliver_to_hangar",
-            j=self.jig_type,
-            h=self.hangar_type,
-            t=self.trailer_type, 
-            pl=self.production_line_type,
-        )
-        unload_from_trailer(
-            self.deliver_jig_to_hangar,
-            self.deliver_jig_to_hangar.j,
-            self.deliver_jig_to_hangar.t,
+        self._unload_from_trailer(
+            deliver_jig_to_hangar,
+            deliver_jig_to_hangar.j,
+            deliver_jig_to_hangar.t,
             self.side_production,
         )
-        self.deliver_jig_to_hangar.add_precondition(self.hangar_free(self.deliver_jig_to_hangar.h))
-        self.deliver_jig_to_hangar.add_effect(self.hangar_free(self.deliver_jig_to_hangar.h), False)
-        self.deliver_jig_to_hangar.add_effect(
-            self.at(self.deliver_jig_to_hangar.j),
-            self.deliver_jig_to_hangar.h,
+        deliver_jig_to_hangar.add_condition(up.StartTiming(), self.hangar_free(deliver_jig_to_hangar.h))
+        deliver_jig_to_hangar.add_effect(up.EndTiming(), self.hangar_free(deliver_jig_to_hangar.h), False)
+        deliver_jig_to_hangar.add_effect(
+            up.EndTiming(),
+            self.at(deliver_jig_to_hangar.j),
+            deliver_jig_to_hangar.h,
         )
-        self.deliver_jig_to_hangar.add_effect(
-            self.jig_size(self.deliver_jig_to_hangar.j),
-            self.jig_size_empty(self.deliver_jig_to_hangar.j),
+        deliver_jig_to_hangar.add_effect(
+            up.EndTiming(),
+            self.jig_size(deliver_jig_to_hangar.j),
+            self.jig_size_empty(deliver_jig_to_hangar.j),
         )
-        self.deliver_jig_to_hangar.add_effect(
-            self.jig_is_empty(self.deliver_jig_to_hangar.j),
+        deliver_jig_to_hangar.add_effect(
+            up.EndTiming(),
+            self.jig_is_empty(deliver_jig_to_hangar.j),
             up.TRUE(),
         )
-        self.pb.add_action(self.deliver_jig_to_hangar)
+        return deliver_jig_to_hangar
 
-        # # #
+    def _make_new_get_jig_from_hangar_activity(self) -> Activity:
+        get_jig_from_hangar = self.pb.add_activity("get_from_hangar"+self._new_activity_uid(), optional=True)
+        get_jig_from_hangar.add_parameter("j", self.jig_type)
+        get_jig_from_hangar.add_parameter("h", self.hangar_type)
+        get_jig_from_hangar.add_parameter("t", self.trailer_type)
 
-        self.do_get_jig_from_hangar = up.InstantaneousAction(
-            "get_from_hangar",
-            j=self.jig_type,
-            h=self.hangar_type,
-            t=self.trailer_type,
-        )
-        load_to_trailer(
-            self.do_get_jig_from_hangar,
-            self.do_get_jig_from_hangar.j,
-            self.do_get_jig_from_hangar.t,
+        self._load_to_trailer(
+            get_jig_from_hangar,
+            get_jig_from_hangar.j,
+            get_jig_from_hangar.t,
             self.side_production
         )
-        self.do_get_jig_from_hangar.add_effect(self.hangar_free(self.do_get_jig_from_hangar.h), True)
-        self.do_get_jig_from_hangar.add_precondition(
-            up.Equals(self.at(self.do_get_jig_from_hangar.j), self.do_get_jig_from_hangar.h),
+        get_jig_from_hangar.add_effect(up.EndTiming(), self.hangar_free(get_jig_from_hangar.h), True)
+        get_jig_from_hangar.add_condition(
+            up.StartTiming(),
+            up.Equals(self.at(get_jig_from_hangar.j), get_jig_from_hangar.h),
         )
-        self.pb.add_action(self.do_get_jig_from_hangar)
+        return get_jig_from_hangar
 
-        # # #
-
-        self.get_jig_from_hangar = self.pb.add_task(
-            TASK_NAME_PREFIX+"get_from_hangar",
-            j=self.jig_type,
-            h=self.hangar_type,
-            t=self.trailer_type,
-            is_noop=up.BoolType(),
+    def _make_new_proceed_to_next_flight_activity(self) -> Activity:
+        proceed_to_next_flight = self.pb.add_activity("switch_to_next_beluga"+self._new_activity_uid(), optional=True)
+        proceed_to_next_flight.add_parameter("b", self.beluga_type)
+        proceed_to_next_flight.add_condition(
+            up.StartTiming(),
+            up.Equals(self.beluga_next(self.beluga_current()), proceed_to_next_flight.b)
         )
-        m1 = up_htn.Method(
-            METHOD_NAME_PREFIX+"get_from_hangar_noop",
-            j=self.jig_type,
-            h=self.hangar_type,
-            t=self.trailer_type,
-            is_noop=up.BoolType(),
-        )
-        m1.set_task(self.get_jig_from_hangar)
-        m1.add_constraint(m1.is_noop)
-        self.pb.add_method(m1)
+        proceed_to_next_flight.add_effect(up.EndTiming(), self.beluga_current(), proceed_to_next_flight.b)
+        return proceed_to_next_flight
 
-        m2 = up_htn.Method(
-            METHOD_NAME_PREFIX+"get_from_hangar_do",
-            j=self.jig_type,
-            h=self.hangar_type,
-            t=self.trailer_type,
-            is_noop=up.BoolType(),
-        )
-        m2.set_task(self.get_jig_from_hangar)
-        m2.add_constraint(up.Not(m2.is_noop))
-        m2.add_subtask(self.do_get_jig_from_hangar, m2.j, m2.h, m2.t)
-        self.pb.add_method(m2)
+    def _make_new_swap_subactivities(self) -> tuple[Activity, Activity]:
+        pickup = self._make_new_pick_up_activity()
+        putdown = self._make_new_put_down_activity()
 
-        # # #
+        self.pb.add_constraint(up.Equals(pickup.j, putdown.j), scope=[pickup.present, putdown.present])
+        self.pb.add_constraint(up.Equals(pickup.t, putdown.t), scope=[pickup.present, putdown.present])
+        self.pb.add_constraint(up.Equals(pickup.s, putdown.s), scope=[pickup.present, putdown.present])
+        self.pb.add_constraint(up.Equals(pickup.os, putdown.os), scope=[pickup.present, putdown.present])
 
-        self.proceed_to_next_flight = up.InstantaneousAction("switch_to_next_beluga", b=self.beluga_type)
-        self.proceed_to_next_flight.add_precondition(up.Equals(self.beluga_next(self.beluga_current()), self.proceed_to_next_flight.b))
-        self.proceed_to_next_flight.add_effect(self.beluga_current(), self.proceed_to_next_flight.b)
-        self.pb.add_action(self.proceed_to_next_flight)
+        self.pb.add_constraint(up.LT(pickup.end, putdown.start), scope=[pickup.present, putdown.present])
 
-        # # #
+        self.pb.add_constraint(up.Implies(putdown.present, pickup.present))
 
-        self.do_swap = self.pb.add_task(
-            TASK_NAME_PREFIX+"swap",
-            is_noop=up.BoolType(),
-            id_=up.IntType(0, 1000),
-            j=self.jig_type,
-            r1=self.rack_type,
-            r2=self.rack_type,
-            t=self.trailer_type,
-            side=self.side_type,
-            rs=up.IntType(0, 1000),
-            mtp_lb=up.IntType(0, 1000),
-            mtp_ub=up.IntType(0, 1000),
-        )
-        m1 = up_htn.Method(
-            METHOD_NAME_PREFIX+"swap_noop",
-            is_noop=up.BoolType(),
-            id_=up.IntType(0, 1000),
-            j=self.jig_type,
-            r1=self.rack_type,
-            r2=self.rack_type,
-            t=self.trailer_type,
-            side=self.side_type,
-            rs=up.IntType(0, 1000),
-            mtp_lb=up.IntType(0, 1000),
-            mtp_ub=up.IntType(0, 1000),
-        )
-        m1.set_task(self.do_swap)
-        m1.add_constraint(m1.is_noop)
-        self.pb.add_method(m1)
+        return (pickup, putdown)
 
-        m2 = up_htn.Method(
-            METHOD_NAME_PREFIX+"swap_do",
-            is_noop=up.BoolType(),
-            id_=up.IntType(0, 1000),
-            j=self.jig_type,
-            r1=self.rack_type,
-            r2=self.rack_type,
-            t=self.trailer_type,
-            side=self.side_type,
-            oside=self.side_type,
-            rs=up.IntType(0, 1000),
-            mtp_lb=up.IntType(0, 1000),
-            mtp_ub=up.IntType(0, 1000),
-        )
-        m2.set_task(self.do_swap)
-        m2.add_constraint(up.Not(m2.is_noop))
-        swap_1half = m2.add_subtask(self.pickup_jig_from_rack, m2.j, m2.t, m2.r1, m2.side, m2.oside)
-        swap_2half = m2.add_subtask(self.do_putdown_jig_on_rack, m2.j, m2.t, m2.r2, m2.side, m2.oside, m2.rs, 0)
-        m2.set_ordered(swap_1half, swap_2half)
-        m2.add_constraint(up.LE(swap_1half.end, m2.mtp_lb))
-        m2.add_constraint(up.LE(m2.mtp_lb, swap_2half.start))
-        m2.add_constraint(up.LE(swap_2half.start, m2.mtp_ub))
-        m2.add_constraint(up.LE(m2.mtp_ub, swap_2half.end))
-        self.pb.add_method(m2)
+    def _add_proceeds(self):
 
-    def _get_number_of_swaps_in_reference_plan(self, plan_def: BelugaPlanDef):
+        for flight in self.pb_def.flights[1:]:
+            proceed_a = self._make_new_proceed_to_next_flight_activity()
+            proceed_a.add_constraint(up.Equals(proceed_a.b, self.beluga_objects[flight.name]))
+            self.pb.add_constraint(proceed_a.present)
+            #for (_, earlier_proceed_a) in self.all_proceeds_to_next_flight:
+            #    self.pb.add_constraint(up.LT(earlier_proceed_a.end, proceed_a.start), scope=[earlier_proceed_a.present, proceed_a.present])
+            self.all_proceeds_to_next_flight.append((flight.name, proceed_a))
 
-        seen = set()
+    def _add_flights_unloads_w_opt_putdowns(self):
 
-        (num_encountered_load, num_encountered_proceed_to_next_flight) = (0, 0)
+        for flight_index in range(self.num_flights):
 
-        plan_len = len(plan_def)
+            earlier_unloads = [] # Put outside of loop ? *A priori*, see no difference in the model's "behavior" / conflicts computed ...
+            beluga_name = self.pb_def.flights[flight_index].name
+            incoming_jigs = self.pb_def.flights[flight_index].incoming
 
-        for k in range(plan_len):
-            a_k = plan_def[k]
+            for i, jig_name in sorted(incoming_jigs.items()):
 
-            if a_k.name == self.unload_jig_from_beluga_to_trailer.name:
-                for (unload_st, putdown_st) in self.all_unloads:
-                    if (unload_st.parameters[0].object() == self.jig_objects[a_k.params['j']]
-                        and not k in seen
-                    ):
-                        seen.add(k)
-                        for l in range(k+1, plan_len):
-                            a_l = plan_def[l]
-                            if (TASK_NAME_PREFIX+a_l.name == self.putdown_jig_on_rack.name
-                                and putdown_st.parameters[0].object() == self.jig_objects[a_l.params['j']]
-                                and a_k.params['t'] == a_l.params['t']
-                            ):
-                                seen.add(l)
-                                break
-                        break
+                unload_a = self._make_new_unload_activity()
+                unload_a.add_constraint(up.Equals(unload_a.j, self.jig_objects[jig_name]))
+                unload_a.add_constraint(up.Equals(unload_a.b, self.beluga_objects[beluga_name]))
 
-            elif a_k.name == self.load_jig_from_trailer_to_beluga.name:
-                (pickup_st, load_st) = self.all_loads[num_encountered_load]
-                seen.add(k)
-                for l in range(k-1, -1, -1):
-                    a_l = plan_def[l]
+                putdown_a = self._make_new_put_down_activity()
+                putdown_a.add_constraint(up.Equals(putdown_a.j, self.jig_objects[jig_name]))
+                putdown_a.add_constraint(up.Equals(putdown_a.s, self.side_beluga))
 
-                    if (a_l.name == self.pickup_jig_from_rack.name
-                        and a_k.params['j'] == a_l.params['j']
-                        and a_k.params['t'] == a_l.params['t']
-                    ):
-                        seen.add(l)
-                        break
-                num_encountered_load += 1
+#                self.pb.add_constraint(up.Iff(unload_a.present, putdown_a.present))
+                self.pb.add_constraint(up.Implies(putdown_a.present, unload_a.present)) # "helper" constraint
 
-            elif a_k.name == self.deliver_jig_to_hangar.name:
-                for (pickup_st, deliver_st) in self.all_delivers:
-                    if (deliver_st.parameters[0].object() == self.jig_objects[a_k.params['j']]
-                        and deliver_st.parameters[3].object() == self.production_line_objects[a_k.params['pl']]
-                        and not k in seen
-                    ):
-                        seen.add(k)
-                        for l in range(k-1, -1, -1):
-                            a_l = plan_def[l]
-            
-                            if (a_l.name == self.pickup_jig_from_rack.name
-                                and pickup_st.parameters[0].object() == self.jig_objects[a_l.params['j']]
-                                and a_k.params['t'] == a_l.params['t']
-                            ):
-                                seen.add(l)
-                                break
-                        break
+#                self.pb.add_constraint(up.And(putdown_a.present, up.LT(unload_a.end, putdown_a.start)), scope=[unload_a.present])
+                self.pb.add_constraint(up.LT(unload_a.end, putdown_a.start), scope=[unload_a.present, putdown_a.present])
 
-            elif TASK_NAME_PREFIX+a_k.name == self.get_jig_from_hangar.name:
-                for (get_st, putdown_st) in self.all_gets:
-                    if (get_st.parameters[0].object() == self.jig_objects[a_k.params['j']]
-                        and not k in seen
-                    ):
-                        seen.add(k)
-                        for l in range(k+1, plan_len):
-                            a_l = plan_def[l]
+                if flight_index > 0:
+                    (_, prev_proceed) = self.all_proceeds_to_next_flight[flight_index-1]
+                    self.pb.add_constraint(up.LT(prev_proceed.end, unload_a.start), scope=[unload_a.present, prev_proceed.present])
 
-                            if (TASK_NAME_PREFIX+a_l.name == self.putdown_jig_on_rack.name
-                                and putdown_st.parameters[0].object() == self.jig_objects[a_l.params['j']]
-                                and a_k.params['t'] == a_l.params['t']
-                            ):
-                                seen.add(l)
-                                break
-                        break
+                if flight_index < self.num_flights-1:
+                    (_, next_proceed) = self.all_proceeds_to_next_flight[flight_index]
+                    self.pb.add_constraint(up.LT(unload_a.end, next_proceed.start), scope=[unload_a.present, next_proceed.present])
 
-            elif a_k.name == self.proceed_to_next_flight.name:
-                seen.add(k)
-                num_encountered_proceed_to_next_flight += 1
+                for earlier_unload_a in earlier_unloads:
+                    self.pb.add_constraint(up.LT(earlier_unload_a.end, unload_a.start), scope=[unload_a.present, earlier_unload_a.present])
+#                    self.pb.add_constraint(up.And(earlier_unload_a.present, up.LT(earlier_unload_a.end, unload_a.start)), scope=[unload_a.present])
 
-            else:
-                continue
+                self.all_unloads_w_putdowns[(jig_name, beluga_name, i)] = (unload_a, putdown_a)
+                self.all_putdowns.append(putdown_a)
 
-        num_swaps = 0
-        for k in range(plan_len):
-            if plan_def[k].name == self.pickup_jig_from_rack.name and not k in seen:
-                num_swaps += 1
+                earlier_unloads.append(unload_a)
 
-        return num_swaps
+    def _add_flights_loads_w_pickups(self):
 
-    def _make_htn_add_unloading(self, flights_index: int) -> up_htn.Subtask | None:
+        for flight_index in range(self.num_flights):
 
-        flights = self.pb_def.flights[flights_index]
+            earlier_loads = [] # Put outside of loop ? *A priori*, see no difference in the model's "behavior" / conflicts computed ...
+            beluga_name = self.pb_def.flights[flight_index].name
+            outgoing_jigs = self.pb_def.flights[flight_index].outgoing
 
-        if len(flights.incoming) == 0:
-            return None
+            for i, jig_or_jig_type_name in sorted(outgoing_jigs.items()):
 
-        prev_unload_st = None
-        for _, jig_name in flights.incoming.items():
+                pickup_a = self._make_new_pick_up_activity()
 
-            self.unloads_rack_vars[jig_name] = self.pb.task_network.add_variable(f"r_{jig_name}_1", self.rack_type)
-            self.unloads_trailer_vars[jig_name] = self.pb.task_network.add_variable(f"t_{jig_name}_1", self.trailer_type)
-            self.unloads_used_rack_size_vars[jig_name] = self.pb.task_network.add_variable(f"rs_{jig_name}_1", up.IntType(0, 1000))
-            self.unloads_max_putdown_delay_vars[jig_name] = self.pb.task_network.add_variable(f"md_{jig_name}_1", up.IntType(0, 1000))
-            self.unloads_is_noop_putdown_vars[jig_name] = self.pb.task_network.add_variable(f"is_noop_{jig_name}_1", up.BoolType())
+                if jig_or_jig_type_name.startswith("jig"):
+                    concrete_jig = jig_or_jig_type_name
+                    aux_jig_var_or_obj = self.jig_objects[concrete_jig]
+                else:
+                    concrete_jig = None
+                    assert jig_or_jig_type_name.startswith("type")
+                    aux_jig_var_or_obj = self.pb.add_variable(f"_aux_jig_{pickup_a.name}", self.jig_subtypes[jig_or_jig_type_name])
 
-            unload_st = self.pb.task_network.add_subtask(
-                self.unload_jig_from_beluga_to_trailer,
-                self.jig_objects[jig_name],
-                self.beluga_objects[flights.name],
-                self.unloads_trailer_vars[jig_name],
-            )
-            putdown_st = self.pb.task_network.add_subtask(
-                self.putdown_jig_on_rack,
-                self.jig_objects[jig_name],
-                self.unloads_trailer_vars[jig_name],
-                self.unloads_rack_vars[jig_name],
-                self.side_beluga,
-                self.side_production,
-                self.unloads_used_rack_size_vars[jig_name],
-                self.unloads_max_putdown_delay_vars[jig_name],
-                self.unloads_is_noop_putdown_vars[jig_name],
-            )
-            self.all_unloads.append((unload_st, putdown_st))
-            self.all_non_swap_subtasks.append(unload_st)
-            self.all_non_swap_subtasks.append(putdown_st)
+                pickup_a.add_constraint(up.Equals(pickup_a.j, aux_jig_var_or_obj))
+                pickup_a.add_constraint(up.Equals(pickup_a.s, self.side_beluga))
 
-            self.pb.task_network.add_constraint(up.LE(up.Minus(putdown_st.start, unload_st.start), self.unloads_max_putdown_delay_vars[jig_name]))
+                load_a = self._make_new_load_activity()
+                load_a.add_constraint(up.Equals(load_a.j, aux_jig_var_or_obj))
+                load_a.add_constraint(up.Equals(load_a.b, self.beluga_objects[beluga_name]))
 
-            self.pb.task_network.set_ordered(unload_st, putdown_st)
+                self.pb.add_constraint(up.Iff(load_a.present, pickup_a.present))
+#                self.pb.add_constraint(up.Implies(load_a.present, pickup_a.present))
 
-            if flights_index > 0:
-                self.pb.task_network.add_constraint(up.LT(self.all_proceed_to_next_flight[flights_index-1].end, unload_st.start))
-            if flights_index < self.num_flights-1:
-                self.pb.task_network.add_constraint(up.LT(unload_st.end, self.all_proceed_to_next_flight[flights_index].start))
+#                self.pb.add_constraint(up.And(pickup_a.present, up.LT(pickup_a.end, load_a.start)), scope=[load_a.present])
+                self.pb.add_constraint(up.LT(pickup_a.end, load_a.start), scope=[load_a.present, pickup_a.present])
 
-            if prev_unload_st is not None:
-                self.pb.task_network.add_constraint(up.LT(prev_unload_st.end, unload_st.start))
-            prev_unload_st = unload_st
+                if flight_index > 0:
+                    (_, prev_proceed) = self.all_proceeds_to_next_flight[flight_index-1]
+#                    self.pb.add_constraint(up.And(prev_proceed.present, up.LT(prev_proceed.end, load_a.start)), scope=[load_a.present])
+                    self.pb.add_constraint(up.LT(prev_proceed.end, load_a.start), scope=[load_a.present, prev_proceed.present])
 
-        return unload_st
+                if flight_index < self.num_flights-1:
+                    (_, next_proceed) = self.all_proceeds_to_next_flight[flight_index]
+                    self.pb.add_constraint(up.LT(load_a.end, next_proceed.start), scope=[load_a.present, next_proceed.present])
 
-    def _make_htn_add_loading(self, flights_index: int, last_unload_before_loads):
-    
-        flights = self.pb_def.flights[flights_index]
-        if len(flights.outgoing) == 0:
-            return
+                for earlier_load_a in earlier_loads:
+                    self.pb.add_constraint(up.LT(earlier_load_a.end, load_a.start), scope=[load_a.present, earlier_load_a.present])
+#                    self.pb.add_constraint(up.And(earlier_load_a.present, up.LT(earlier_load_a.end, load_a.start)), scope=[load_a.present])
 
-        flight_name = flights.name
-        prev_load_st = None
-        for i, jig_type_name in flights.outgoing.items():
+                self.all_loads_w_pickups[(jig_or_jig_type_name, beluga_name, i)] = (load_a, pickup_a)
+                self.all_pickups.append(pickup_a)
 
-            self.loads_jig_vars[(flights.name, i)] = self.pb.task_network.add_variable(f"jig_{flights.name}_{i}", self.jig_subtypes[jig_type_name])
-            self.loads_trailer_vars[(flights.name, i)] = self.pb.task_network.add_variable(f"t_{flights.name}_{i}", self.trailer_type)
-            self.loads_rack_vars[(flights.name, i)] = self.pb.task_network.add_variable(f"r_{flights.name}_{i}", self.rack_type)
+                earlier_loads.append(load_a)
 
-            if jig_type_name.startswith("jig"):
-                self.pb.task_network.add_constraint(up.Equals(self.loads_jig_vars[(flights.name, i)], self.jig_objects[jig_type_name]))
-                # FIXME TODO: ^ will have to be put in a conjunction ("and") together with the acomplishment of the task, to represent the property of achieving this spec (loading)
-            else:
-                assert jig_type_name.startswith("type")
+    def _add_pls_deliveries_w_pickups_and_retrievals_w_opt_putdowns(self):
 
-            pickup_st = self.pb.task_network.add_subtask(
-                self.pickup_jig_from_rack,
-                self.loads_jig_vars[(flight_name, i)],
-                self.loads_trailer_vars[(flight_name, i)],
-                self.loads_rack_vars[(flight_name, i)],
-                self.side_beluga,
-                self.side_production,
-            )
-            load_st = self.pb.task_network.add_subtask(
-                self.load_jig_from_trailer_to_beluga, 
-                self.loads_jig_vars[(flight_name, i)], 
-                self.beluga_objects[flight_name], 
-                self.loads_trailer_vars[(flight_name, i)],
-            )
-            self.all_loads.append((pickup_st, load_st))
-            self.all_non_swap_subtasks.append(pickup_st)
-            self.all_non_swap_subtasks.append(load_st)
+        for production_line in self.pb_def.production_lines:
 
-            # vvv WARNING vvv
-            # if i == 0 and last_unload_before_loads is not None:
-            #     self.pb.task_network.set_ordered(last_unload_before_loads, load_st)
-            # ^^^ WARNING ^^^ LOADS ARE ALLOWED TO BE MADE BEFORE ALL UNLOADS ARE FINISHED, SO THIS IS COMMENTED OUT
+            earlier_delivers = []
 
-            self.pb.task_network.set_ordered(pickup_st, load_st)
+            for i, jig_name in sorted(production_line.schedule.items()):
 
-            if flights_index > 0:
-                self.pb.task_network.add_constraint(up.LT(self.all_proceed_to_next_flight[flights_index-1].end, load_st.start))
-            if flights_index < self.num_flights-1:
-                self.pb.task_network.add_constraint(up.LT(load_st.end, self.all_proceed_to_next_flight[flights_index].start))
+                # pickup + deliver
 
-            if prev_load_st is not None:
-                self.pb.task_network.add_constraint(up.LT(prev_load_st.end, load_st.start))
-            prev_load_st = load_st
+                pickup_a = self._make_new_pick_up_activity()
+                pickup_a.add_constraint(up.Equals(pickup_a.j, self.jig_objects[jig_name]))
+                pickup_a.add_constraint(up.Equals(pickup_a.s, self.side_production))
 
-    def _make_htn_add_delivering_and_getting(self, production_line: ProductionLine):
+                deliver_a = self._make_new_deliver_jig_to_hangar_activity()
+                deliver_a.add_constraint(up.Equals(deliver_a.j, self.jig_objects[jig_name]))
+                deliver_a.add_constraint(up.Equals(deliver_a.pl, self.production_line_objects[production_line.name]))
 
-        prev_deliver = None
-        for (_, jig_name) in sorted(production_line.schedule.items()):
+#                self.pb.add_constraint(up.Iff(deliver_a.present, pickup_a.present))
+                self.pb.add_constraint(up.Implies(deliver_a.present, pickup_a.present))
 
-            self.delivers_trailer_vars[jig_name] = self.pb.task_network.add_variable(f"t_{jig_name}_2a", self.trailer_type)
-            self.delivers_rack_vars[jig_name] = self.pb.task_network.add_variable(f"r_{jig_name}_2a", self.rack_type)
-            self.delivers_n_gets_hangar_vars[jig_name] = self.pb.task_network.add_variable(f"h_{jig_name}_2", self.hangar_type)
-            self.gets_trailer_vars[jig_name] = self.pb.task_network.add_variable(f"t_{jig_name}_2b", self.trailer_type)
-            self.gets_rack_vars[jig_name] = self.pb.task_network.add_variable(f"r_{jig_name}_2b", self.rack_type)
-            self.gets_used_rack_size_vars[jig_name] = self.pb.task_network.add_variable(f"rs_{jig_name}_2b", up.IntType(0, 1000))
-            self.gets_max_putdown_delay_vars[jig_name] = self.pb.task_network.add_variable(f"md_{jig_name}_2b", up.IntType(0, 1000))
-            self.gets_is_noop_vars[jig_name] = self.pb.task_network.add_variable(f"is_noop_{jig_name}_2b", up.BoolType())
+#                self.pb.add_constraint(up.And(pickup_a.present, up.LT(pickup_a.end, deliver_a.start)), scope=[deliver_a.present])
+                self.pb.add_constraint(up.LT(pickup_a.end, deliver_a.start), scope=[deliver_a.present, pickup_a.present])
 
-            pickup_st = self.pb.task_network.add_subtask(
-                self.pickup_jig_from_rack,
-                self.jig_objects[jig_name],
-                self.delivers_trailer_vars[jig_name],
-                self.delivers_rack_vars[jig_name],
-                self.side_production,
-                self.side_beluga,
-            )
-            deliver_st = self.pb.task_network.add_subtask(
-                self.deliver_jig_to_hangar,
-                self.jig_objects[jig_name],
-                self.delivers_n_gets_hangar_vars[jig_name],
-                self.delivers_trailer_vars[jig_name],
-                self.production_line_objects[production_line.name],
-            )
-            self.all_delivers.append((pickup_st, deliver_st))
-            self.all_non_swap_subtasks.append(pickup_st)
-            self.all_non_swap_subtasks.append(deliver_st)
+                for earlier_deliver_a in earlier_delivers:
+                    self.pb.add_constraint(up.LT(earlier_deliver_a.end, deliver_a.start), scope=[earlier_deliver_a.present, deliver_a.present])
+#                    self.pb.add_constraint(up.And(earlier_deliver_a.present, up.LT(earlier_deliver_a.end, deliver_a.start)), scope=[deliver_a.present])
 
-            if prev_deliver is not None:
-                self.pb.task_network.add_constraint(up.LT(prev_deliver.start, deliver_st.start))
-#                self.pb.task_network.add_constraint(up.LE(prev_deliver.end, deliver_st.end))
-##                self.pb.task_network.add_constraint(up.LE(prev_deliver.end, deliver_st.start))
-            prev_deliver = deliver_st
+                self.all_delivers_w_pickups[(jig_name, production_line.name, i)] = (deliver_a, pickup_a)
+                self.all_pickups.append(pickup_a)
 
-            get_st = self.pb.task_network.add_subtask(
-                self.get_jig_from_hangar,
-                self.jig_objects[jig_name],
-                self.delivers_n_gets_hangar_vars[jig_name],
-                self.gets_trailer_vars[jig_name],
-                # self.gets_is_noop_vars[jig_name],
-                up.FALSE(),
-            )
-            putdown_st = self.pb.task_network.add_subtask(
-                self.putdown_jig_on_rack,
-                self.jig_objects[jig_name], 
-                self.gets_trailer_vars[jig_name],
-                self.gets_rack_vars[jig_name],
-                self.side_production,
-                self.side_beluga,
-                self.gets_used_rack_size_vars[jig_name],
-                self.gets_max_putdown_delay_vars[jig_name],
-                self.gets_is_noop_vars[jig_name],
-            )
-            self.all_gets.append((get_st, putdown_st))
-            self.all_non_swap_subtasks.append(get_st)
-            self.all_non_swap_subtasks.append(putdown_st)
+                earlier_delivers.append(deliver_a)
 
-            self.pb.task_network.add_constraint(up.LE(up.Minus(putdown_st.start, get_st.start), self.gets_max_putdown_delay_vars[jig_name]))
+                # get + putdown
 
-            self.pb.task_network.set_ordered(pickup_st, deliver_st, get_st, putdown_st)
+                get_a = self._make_new_get_jig_from_hangar_activity()
+                get_a.add_constraint(up.Equals(get_a.j, self.jig_objects[jig_name]))
+                self.pb.add_constraint(up.Equals(get_a.h, deliver_a.h), scope=[get_a.present, deliver_a.present])
 
-    def _make_htn_add_swaps(self):
+                self.pb.add_constraint(up.LT(deliver_a.end, get_a.start), scope=[deliver_a.present, get_a.present])
+
+                putdown_a = self._make_new_put_down_activity()
+                putdown_a.add_constraint(up.Equals(putdown_a.j, self.jig_objects[jig_name]))
+                putdown_a.add_constraint(up.Equals(putdown_a.s, self.side_production))
+
+                self.pb.add_constraint(up.LT(get_a.end, putdown_a.start), scope=[get_a.present, putdown_a.present])
+
+                self.pb.add_constraint(up.Implies(putdown_a.present, get_a.present))
+
+                self.all_gets_w_putdowns[jig_name] = (get_a, putdown_a)
+                self.all_putdowns.append(putdown_a)
+
+    def _add_swaps(self):
         """Adding a limited number of allowed swaps to the task network. Uniquely identifiable because of their ids' ordering"""
 
-        self.num_used_swaps = self.pb.task_network.add_variable("num_used_swaps", up.IntType(0, self.num_available_swaps))
+        self.num_used_swaps = self.pb.add_variable("num_used_swaps", up.IntType(0, self.num_available_swaps))
 
-        # prev_id_var = None
-        # for i, id_val in enumerate(range(num_available_swaps)):
-        for id_val in range(self.num_available_swaps):
+        prev_pickup_a = None
+        for i in range(self.num_available_swaps):
+            pickup_a, putdown_a = self._make_new_swap_subactivities()
 
-            self.swaps_is_noop_vars[id_val] = self.pb.task_network.add_variable(f"is_noop_swap{id_val}", up.BoolType())
-            #self.swaps_id_vars[id_val] = self.pb.task_network.add_variable(f"id_swap{id_val}", up.IntType(0, self.num_available_swaps))
-            self.swaps_jig_vars[id_val] = self.pb.task_network.add_variable(f"j_swap{id_val}", self.jig_type)
-            self.swaps_rack1_vars[id_val] = self.pb.task_network.add_variable(f"r1_swap{id_val}", self.rack_type)
-            self.swaps_rack2_vars[id_val] = self.pb.task_network.add_variable(f"r2_swap{id_val}", self.rack_type)
-            self.swaps_trailer_vars[id_val] = self.pb.task_network.add_variable(f"t_swap{id_val}", self.trailer_type)
-            self.swaps_side_vars[id_val] = self.pb.task_network.add_variable(f"s_swap{id_val}", self.side_type)
-            self.swaps_used_rack_size_vars[id_val] = self.pb.task_network.add_variable(f"rs_swap{id_val}", up.IntType(0, 1000))
-            self.swaps_mid_timepoint_lb_vars[id_val] = self.pb.task_network.add_variable(f"mtp_lb_swap{id_val}", up.IntType(0, 1000))
-            self.swaps_mid_timepoint_ub_vars[id_val] = self.pb.task_network.add_variable(f"mtp_ub_swap{id_val}", up.IntType(0, 1000))
+            self.pb.add_constraint(up.Iff(up.LT(i, self.num_used_swaps), pickup_a.present))
+            # self.pb.add_constraint(up.Implies(putdown_a.present, pickup_a.present))
+            self.pb.add_constraint(up.Iff(putdown_a.present, pickup_a.present))
 
-            swap_st = self.pb.task_network.add_subtask(
-                self.do_swap,
-                self.swaps_is_noop_vars[id_val],
-                # id_vars_swaps[id_val],
-                id_val,
-                self.swaps_jig_vars[id_val],
-                self.swaps_rack1_vars[id_val],
-                self.swaps_rack2_vars[id_val],
-                self.swaps_trailer_vars[id_val],
-                self.swaps_side_vars[id_val],
-                self.swaps_used_rack_size_vars[id_val],
-                self.swaps_mid_timepoint_lb_vars[id_val],
-                self.swaps_mid_timepoint_ub_vars[id_val],
-            )
-            self.all_swaps.append(swap_st)
+            if prev_pickup_a is not None:
+                self.pb.add_constraint(up.LT(prev_pickup_a.start, pickup_a.start), scope=[prev_pickup_a.present, pickup_a.present])
+                self.pb.add_constraint(up.Implies(pickup_a.present, prev_pickup_a.present))
+            prev_pickup_a = pickup_a
 
-            self.pb.task_network.add_constraint(
-                up.Or(
-                    # up.And(up.LT(id_var, self.num_used_swaps), up.Not(self.swaps_is_noop_vars[id_val])),
-                    # up.And(up.GE(id_var, self.num_used_swaps), self.swaps_is_noop_vars[id_val]),
-                    up.And(up.LT(id_val, self.num_used_swaps), up.Not(self.swaps_is_noop_vars[id_val])),
-                    up.And(up.GE(id_val, self.num_used_swaps), self.swaps_is_noop_vars[id_val]),
-                )
-            )
-            if id_val > 0:
-                self.pb.task_network.add_constraint(up.LT(self.all_swaps[-2].start, self.all_swaps[-1].start))
-            #     self.pb.task_network.add_constraint(up.LT(prev_id_var, id_var))
-            # prev_id_var = id_var
+            self.all_swap_pickups_n_putdowns[i] = (pickup_a, putdown_a)
+            self.all_putdowns.append(putdown_a)
 
-@dataclass
-class BelugaPlanProblemMatching:
-    struct_vars_plan_assignments: dict[up.Parameter, ConstantExpression]
-    struct_map_plan_action_to_subtask: dict[int, up_htn.Subtask | tuple[bool, up_htn.Subtask]]
-    struct_map_plan_action_to_subtask_inv: dict[up_htn.Subtask | tuple[bool, up_htn.Subtask], int]
-    pref_at_least_one_rack_always_empty: bool
-    pref_rack_always_empty: dict[up.Object, bool]
-    # pref_always_jigs_of_same_type_on_rack: dict[up.Object, bool]
-    pref_max_rack_size_used_for_jig: dict[up.Object, int]
-    pref_putdown_full_delay: dict[up.Object, int]
-    pref_putdown_empty_delay: dict[up.Object, int]
-    all_non_swap_subtasks_not_required_by_plan: list[up_htn.Subtask]
+    def _add_trailers_initial_jigs_opt_putdowns(self):
+        # TODO: force these to be before all actions on these jigs (for performance)
 
-def analyse_reference_plan(
-    plan_def: BelugaPlanDef,
-    beluga_model: BelugaModel,   
-) -> BelugaPlanProblemMatching:
+        for trailer_b in self.pb_def.trailers_beluga:
+            if trailer_b.jig is None:
+                continue
+            putdown_a = self._make_new_put_down_activity()
+            putdown_a.add_constraint(up.Equals(putdown_a.j, self.jig_objects[trailer_b.jig]))
+            putdown_a.add_constraint(up.Equals(putdown_a.s, self.side_beluga))
 
-    struct_vars_plan_assignments: dict[up.Parameter, ConstantExpression] = {}
-    struct_map_plan_action_to_subtask: dict[int, up_htn.Subtask | tuple[bool, up_htn.Subtask]] = {}
-    struct_map_plan_action_to_subtask_inv: dict[up_htn.Subtask | tuple[bool, up_htn.Subtask], int] = {}
+            self.all_putdowns.append(putdown_a)
 
-    ##### Match problem subtasks (+ parameters/variables) with plan actions (+ parameter/variable assignments) #####
+        for trailer_f in self.pb_def.trailers_factory:
+            if trailer_f.jig is None:
+                continue
+            putdown_a = self._make_new_put_down_activity()
+            putdown_a.add_constraint(up.Equals(putdown_a.j, self.jig_objects[trailer_f.jig]))
+            putdown_a.add_constraint(up.Equals(putdown_a.s, self.side_production))
 
-    def insert(plan_action_index: int, subtask: up_htn.Subtask | tuple[bool, up_htn.Subtask]):
-        assert plan_action_index not in struct_map_plan_action_to_subtask and subtask not in struct_map_plan_action_to_subtask_inv
-        struct_map_plan_action_to_subtask[plan_action_index] = subtask
-        struct_map_plan_action_to_subtask_inv[subtask] = plan_action_index
+            self.all_putdowns.append(putdown_a)
 
-    def contains_plan_action(plan_action_index: int) -> bool:
-        return plan_action_index in struct_map_plan_action_to_subtask
-    
-    def contains_subtask(subtask: up_htn.Subtask | tuple[bool, up_htn.Subtask]) -> bool:
-        return subtask in struct_map_plan_action_to_subtask_inv
+    def _add_hangars_initial_jigs_retrievals_w_opt_putdowns(self):
+        # TODO: force these to be before all actions on these jigs (for performance)
 
-    def insert_var_assignment(var: up.Parameter, val: ConstantExpression):
-        assert var not in struct_vars_plan_assignments
-        struct_vars_plan_assignments[var] = val
+        for hangar in self.pb_def.hangars:
+            if hangar.jig is None:
+                continue
 
-    (num_encountered_load, num_encountered_proceed_to_next_flight) = (0, 0)
+            get_a = self._make_new_get_jig_from_hangar_activity()
+            get_a.add_constraint(up.Equals(get_a.j, self.jig_objects[hangar.jig]))
+            get_a.add_constraint(up.Equals(get_a.h, self.hangar_objects[hangar.name]))
 
-    plan_len = len(plan_def)
+            putdown_a = self._make_new_put_down_activity()
+            putdown_a.add_constraint(up.Equals(putdown_a.j, self.jig_objects[hangar.jig]))
+            putdown_a.add_constraint(up.Equals(putdown_a.s, self.side_production))
 
-    for k in range(plan_len):
-        a_k = plan_def[k]
+            self.pb.add_constraint(up.LT(get_a.end, putdown_a.start), scope=[get_a.present, putdown_a.present])
 
-        if a_k.name == beluga_model.unload_jig_from_beluga_to_trailer.name:
-            for (unload_st, putdown_st) in beluga_model.all_unloads:
-                if (unload_st.parameters[0].object() == beluga_model.jig_objects[a_k.params['j']]
-                    and not contains_subtask(unload_st)
-                ):
-                    insert(k, unload_st)
-                    for l in range(k+1, plan_len):
-                        a_l = plan_def[l]
-                        if (TASK_NAME_PREFIX+a_l.name == beluga_model.putdown_jig_on_rack.name
-                            and putdown_st.parameters[0].object() == beluga_model.jig_objects[a_l.params['j']]
-                            and a_k.params['t'] == a_l.params['t']
-                        ):
-                            insert(l, putdown_st)
-                            insert_var_assignment(putdown_st.parameters[1].parameter(), beluga_model.trailer_objects[a_k.params['t']])
-                            insert_var_assignment(putdown_st.parameters[2].parameter(), beluga_model.rack_objects[a_l.params['r']])
-                            insert_var_assignment(putdown_st.parameters[5].parameter(), beluga_model.pb.explicit_initial_values[beluga_model.rack_size(beluga_model.rack_objects[a_l.params['r']])].int_constant_value())
-                            break
-                    break
+            self.pb.add_constraint(up.Implies(putdown_a.present, get_a.present))
 
-        elif a_k.name == beluga_model.load_jig_from_trailer_to_beluga.name:
-            (pickup_st, load_st) = beluga_model.all_loads[num_encountered_load]
-            insert(k, load_st)
-            for l in range(k-1, -1, -1):
-                a_l = plan_def[l]
+            self.all_putdowns.append(putdown_a)
 
-                if (a_l.name == beluga_model.pickup_jig_from_rack.name
-                    and a_k.params['j'] == a_l.params['j']
-                    and a_k.params['t'] == a_l.params['t']
-                ):
-                    insert(l, pickup_st)
-                    insert_var_assignment(pickup_st.parameters[0].parameter(), beluga_model.jig_objects[a_k.params['j']])
-                    insert_var_assignment(pickup_st.parameters[1].parameter(), beluga_model.trailer_objects[a_k.params['t']])
-                    insert_var_assignment(pickup_st.parameters[2].parameter(), beluga_model.rack_objects[a_l.params['r']])
-                    break
-            num_encountered_load += 1
+    def _add_opt_pickup_for_each_jig_last_non_swap(self):
 
-        elif a_k.name == beluga_model.deliver_jig_to_hangar.name:
-            for (pickup_st, deliver_st) in beluga_model.all_delivers:
-                if (deliver_st.parameters[0].object() == beluga_model.jig_objects[a_k.params['j']]
-                    and deliver_st.parameters[3].object() == beluga_model.production_line_objects[a_k.params['pl']]
-                    and not contains_subtask(deliver_st)
-                ):
-                    insert(k, deliver_st)
-                    for l in range(k-1, -1, -1):
-                        a_l = plan_def[l]
-        
-                        if (a_l.name == beluga_model.pickup_jig_from_rack.name
-                            and pickup_st.parameters[0].object() == beluga_model.jig_objects[a_l.params['j']]
-                            and a_k.params['t'] == a_l.params['t']
-                        ):
-                            insert(l, pickup_st)
-                            insert_var_assignment(pickup_st.parameters[1].parameter(), beluga_model.trailer_objects[a_k.params['t']])
-                            insert_var_assignment(pickup_st.parameters[2].parameter(), beluga_model.rack_objects[a_l.params['r']])
-                            break
-                    break
+        for _, jig_obj in self.jig_objects.items():
+            pickup_a = self._make_new_pick_up_activity()
+            pickup_a.add_constraint(up.Equals(pickup_a.j, jig_obj))
 
-        elif TASK_NAME_PREFIX+a_k.name == beluga_model.get_jig_from_hangar.name:
-            for (get_st, putdown_st) in beluga_model.all_gets:
-                if (get_st.parameters[0].object() == beluga_model.jig_objects[a_k.params['j']]
-                    and not contains_subtask(get_st)
-                ):
-                    insert(k, get_st)
-                    for l in range(k+1, plan_len):
-                        a_l = plan_def[l]
+            self.all_pickups.append(pickup_a)
 
-                        if (TASK_NAME_PREFIX+a_l.name == beluga_model.putdown_jig_on_rack.name
-                            and putdown_st.parameters[0].object() == beluga_model.jig_objects[a_l.params['j']]
-                            and a_k.params['t'] == a_l.params['t']
-                        ):
-                            insert(l, putdown_st)
-                            insert_var_assignment(putdown_st.parameters[1].parameter(), beluga_model.trailer_objects[a_k.params['t']])
-                            insert_var_assignment(putdown_st.parameters[2].parameter(), beluga_model.rack_objects[a_l.params['r']])
-                            insert_var_assignment(putdown_st.parameters[5].parameter(), beluga_model.pb.explicit_initial_values[beluga_model.rack_size(beluga_model.rack_objects[a_l.params['r']])].int_constant_value())
-                            break
-                    break
+    def _reify_prop_rack_always_empty(
+        self,
+        rack_name: str,
+        prop_id: PropId | None,
+    ) -> up.Parameter:
 
-        elif a_k.name == beluga_model.proceed_to_next_flight.name:
-            insert(k, beluga_model.all_proceed_to_next_flight[num_encountered_proceed_to_next_flight])
-            num_encountered_proceed_to_next_flight += 1
+        reif_name = f"prop_{prop_id}_{rack_name}_always_empty" if prop_id is not None else f"{rack_name}_always_empty"
 
+        if reif_name in self.pb.base_variables:
+            r_always_empty = self.pb.get_variable(reif_name)
         else:
-            continue
+            r_always_empty = self.pb.add_variable(reif_name, up.BoolType())
 
-    swap_id = 0
-    for k in range(plan_len):
-        a_k = plan_def[k]
+            terms = []
 
-        if a_k.name == beluga_model.pickup_jig_from_rack.name and not contains_plan_action(k):
-            for l in range(k+1, plan_len):
-                a_l = plan_def[l]
-                if (not contains_plan_action(l)
-                    and TASK_NAME_PREFIX+a_l.name == beluga_model.putdown_jig_on_rack.name
-                    and a_k.params['j'] == a_l.params['j']
-                    and a_k.params['t'] == a_l.params['t']
-                    and a_k.params['s'] == a_l.params['s']
-                ):
-                    swap = beluga_model.pb.task_network.get_subtask(beluga_model.all_swaps[swap_id].identifier)
-                    insert(k, (False, swap))
-                    insert(l, (True, swap))
-                    insert_var_assignment(swap.parameters[0].parameter(), up.FALSE())
-                    assert(swap.parameters[1].constant_value() == swap_id)
-                    insert_var_assignment(swap.parameters[2].parameter(), beluga_model.jig_objects[a_k.params['j']])
-                    insert_var_assignment(swap.parameters[3].parameter(), beluga_model.rack_objects[a_k.params['r']])
-                    insert_var_assignment(swap.parameters[4].parameter(), beluga_model.rack_objects[a_l.params['r']])
-                    insert_var_assignment(swap.parameters[5].parameter(), beluga_model.trailer_objects[a_k.params['t']])
-                    insert_var_assignment(swap.parameters[6].parameter(), beluga_model.pb.object(a_k.params['s']))
-                    insert_var_assignment(swap.parameters[7].parameter(), beluga_model.pb.explicit_initial_values[beluga_model.rack_size(beluga_model.rack_objects[a_l.params['r']])].int_constant_value())
+            rack_initially_empty = up.Bool(
+                self.pb.explicit_initial_values[self.rack_free_space(self.rack_objects[rack_name])]
+                == self.pb.explicit_initial_values[self.rack_size(self.rack_objects[rack_name])]
+            )
+            terms += [rack_initially_empty]
+            #terms += [up.Implies(putdown.present, up.Not(up.Equals(putdown.get_parameter("r"), self.rack_objects[rack_name])))
+            #          for (_, putdown) in self.all_unloads_w_putdowns.values()]
+            #terms += [up.Implies(putdown.present, up.Not(up.Equals(putdown.get_parameter("r"), self.rack_objects[rack_name])))
+            #          for (_, putdown) in self.all_gets_w_putdowns.values()]
+            #terms += [up.Implies(putdown.present, up.Not(up.Equals(putdown.get_parameter("r"), self.rack_objects[rack_name])))
+            #          for (_, putdown) in self.all_swap_pickups_n_putdowns.values()]
+            terms += [up.Implies(putdown.present, up.Not(up.Equals(putdown.get_parameter("r"), self.rack_objects[rack_name])))
+                      for putdown in self.all_putdowns]
 
-                    swap_id += 1
-                    break
+            self.pb.add_constraint(up.Iff(r_always_empty, up.And(terms)))
 
-    insert_var_assignment(beluga_model.num_used_swaps, swap_id)
+        return r_always_empty
 
-    # Assign the "is_noop" variable of the remaining / not used swaps to False
-    for swap in beluga_model.all_swaps:
-        if (not contains_subtask((False, swap))
-            and not contains_subtask((True, swap))
-        ):
-            insert_var_assignment(swap.parameters[0].parameter(), up.TRUE())
+    def _reify_prop_at_least_one_rack_always_empty(
+        self,
+        prop_id: PropId | None,
+    ) -> up.Parameter:
+        """
+        Ideally (for performance) this should be called after all `_reify_prop_rack_always_empty` have been called.
 
-    #print(set(range(plan_len)).difference(plan_action_to_subtask_map.keys()))
-    for a in struct_map_plan_action_to_subtask:
-        print(a, struct_map_plan_action_to_subtask[a])
-    for a in set(range(plan_len)).difference(struct_map_plan_action_to_subtask.keys()):
-        print(a, plan_def[a])        
-    assert len(set(range(plan_len)).difference(struct_map_plan_action_to_subtask.keys())) == 0
+        Note that this property concerns *all* racks, not just the ones specified in "rack always empty" properties !
+        """
 
-    ##### Read values of preferences in the plan #####
+        reif_name = f"prop_{prop_id}_at_least_one_rack_always_empty" if prop_id is not None else f"at_least_one_rack_always_empty"
 
-    # size of largest rack onto which the same jig is placed
-
-    pref_max_rack_size_used_for_jig = {}
-    for j in beluga_model.pb_def.jigs:
-        jig_name = j.name
-        jig = beluga_model.jig_objects[jig_name]
-
-        if beluga_model.at(jig) in beluga_model.pb.explicit_initial_values:
-            jig_initially_at = beluga_model.pb.explicit_initial_values[beluga_model.at(jig)].object()
+        if reif_name in self.pb.base_variables:
+            at_least_one_rack_always_empty = self.pb.get_variable(reif_name)
         else:
-            jig_initially_at = None
-        if jig_initially_at in beluga_model.rack_objects: # if the initial location of the jig is actually a rack
-            val = beluga_model.rack_size[jig_initially_at] # type: ignore
-            pref_max_rack_size_used_for_jig[jig] = max(val, pref_max_rack_size_used_for_jig.setdefault(jig, val))
+            at_least_one_rack_always_empty = self.pb.add_variable(reif_name, up.BoolType())
 
-        if jig_name in beluga_model.unloads_used_rack_size_vars:
-            val = struct_vars_plan_assignments.get(beluga_model.unloads_used_rack_size_vars[jig_name], None)
-            if val is not None:
-                pref_max_rack_size_used_for_jig[jig] = max(val, pref_max_rack_size_used_for_jig.setdefault(jig, val))
+            terms = []
 
-        if jig_name in beluga_model.gets_used_rack_size_vars:
-            val = struct_vars_plan_assignments.get(beluga_model.gets_used_rack_size_vars[jig_name], None)
-            if val is not None:
-                pref_max_rack_size_used_for_jig[jig] = max(val, pref_max_rack_size_used_for_jig.setdefault(jig, val))
+            for _r in self.pb_def.racks:
+                rack_name = _r.name
 
-        for id_swap in beluga_model.swaps_used_rack_size_vars:
-            jig_var_swap = beluga_model.swaps_jig_vars[id_swap]
-            if jig_var_swap in struct_vars_plan_assignments and struct_vars_plan_assignments[jig_var_swap] == jig:
-                val = struct_vars_plan_assignments.get(beluga_model.swaps_used_rack_size_vars[id_swap], None)
-                if val is not None:
-                    pref_max_rack_size_used_for_jig[jig] = max(val, pref_max_rack_size_used_for_jig.setdefault(jig, val))
+                found_among_props_rack_always_empty = False
+                for (pid, rn) in self.pb_def.props_rack_always_empty:
+                    if rn == rack_name:
+                        terms += [self._reify_prop_rack_always_empty(rack_name, pid)]
+                        found_among_props_rack_always_empty = True
+                        break
+                if not found_among_props_rack_always_empty:
+                    terms += [self._reify_prop_rack_always_empty(rack_name, None)]
 
-    # always jigs of same type on rack
+            self.pb.add_constraint(up.Iff(at_least_one_rack_always_empty, up.Or(terms)))
 
-    pref_jig_types_on_rack = {}
+        return at_least_one_rack_always_empty
 
-    for rack in beluga_model.pb_def.racks:
-        rack_name = rack.name
-        rack = beluga_model.rack_objects[rack_name]
-        pref_jig_types_on_rack.setdefault(rack, set())
+    def _reify_prop_jig_always_placed_on_rack_shorter_or_same_size_as(
+        self,
+        jig_name: str,
+        max_allowed_rack_size: int,
+        prop_id: PropId | None,
+    ) -> up.Parameter:
 
-        initial_jig_type_on_rack: JigType | None = None # None when no jig initially on the rack
-        for j in beluga_model.pb_def.jigs:
-            jig_name = j.name
-            jig = beluga_model.jig_objects[jig_name]
-            jig_initially_at_rack = (beluga_model.pb.explicit_initial_values[beluga_model.at(jig)].object() == rack if beluga_model.at(jig) in beluga_model.pb.explicit_initial_values else False)
-            if jig_initially_at_rack:
-                initial_jig_type_on_rack = beluga_model.pb_def.get_jig_type(beluga_model.pb_def.get_jig(jig_name).type)
-                if initial_jig_type_on_rack is not None:
-                    pref_jig_types_on_rack[rack].add(initial_jig_type_on_rack.name)
+        reif_name = f"prop_{prop_id}_{jig_name}_always_placed_on_rack_shorter_or_same_size_as" if prop_id is not None else f"{jig_name}_always_placed_on_rack_shorter_or_same_size_as"
 
-    for jig_name, rack_var in beluga_model.unloads_rack_vars.items():
-        if rack_var in struct_vars_plan_assignments:
-            rack = struct_vars_plan_assignments[rack_var]
-            pref_jig_types_on_rack[rack].add(beluga_model.pb_def.get_jig_type(beluga_model.pb_def.get_jig(jig_name).type).name)
-
-    for jig_name, rack_var in beluga_model.gets_rack_vars.items():
-        if rack_var in struct_vars_plan_assignments:
-            rack = struct_vars_plan_assignments[rack_var]
-            pref_jig_types_on_rack[rack].add(beluga_model.pb_def.get_jig_type(beluga_model.pb_def.get_jig(jig_name).type).name)
-
-    for id_swap, rack_var in beluga_model.swaps_rack2_vars.items():
-        if rack_var in struct_vars_plan_assignments:
-            rack = struct_vars_plan_assignments[rack_var]
-            jig_name = struct_vars_plan_assignments[beluga_model.swaps_jig_vars[id_swap]].name # type: ignore
-            pref_jig_types_on_rack[rack].add(beluga_model.pb_def.get_jig_type(beluga_model.pb_def.get_jig(jig_name).type).name)
-
-    pref_always_jigs_of_same_type_on_rack = { rack: True if len(jt) <= 1 else False for rack, jt in pref_jig_types_on_rack.items() }
-
-    # rack always empty
-
-    pref_rack_always_empty = {}
-    
-    for rack in beluga_model.pb_def.racks:
-        rack = beluga_model.rack_objects[rack.name]
-        if rack not in pref_always_jigs_of_same_type_on_rack or len(pref_jig_types_on_rack[rack]) == 0:
-            pref_rack_always_empty[rack] = True
+        if reif_name in self.pb.base_variables:
+            jig_always_placed_on_rack_shorter_or_same_size_as = self.pb.get_variable(reif_name)
         else:
-            pref_rack_always_empty[rack] = False
+            jig_always_placed_on_rack_shorter_or_same_size_as = self.pb.add_variable(reif_name, up.BoolType())
 
-    # at least one rack always empty
+            terms = []
 
-    pref_at_least_one_rack_always_empty = True in pref_rack_always_empty.values()
+            _temp = self.pb.explicit_initial_values.get(self.at(self.jig_objects[jig_name]), None)
+            if _temp is not None and _temp.object() in self.rack_objects.values(): # (if initially at a rack, and not a beluga for example)
+                rack_jig_is_initially_at = _temp.object()
+            else:
+                rack_jig_is_initially_at = None
 
-    # # #
+            if rack_jig_is_initially_at is not None:
+                assert self.rack_size(rack_jig_is_initially_at) in self.pb.explicit_initial_values
+                terms += [up.LE(self.pb.explicit_initial_values[self.rack_size(rack_jig_is_initially_at)], max_allowed_rack_size)]
 
-    all_non_swap_subtasks_not_required_by_plan=list(set(beluga_model.all_non_swap_subtasks).difference(struct_map_plan_action_to_subtask_inv.keys()))
+            #terms += [up.Implies(putdown.present, up.LE(putdown.get_parameter("rs"), max_allowed_rack_size))
+            #          for (_, putdown) in self.all_unloads_w_putdowns.values()]
+            #terms += [up.Implies(putdown.present, up.LE(putdown.get_parameter("rs"), max_allowed_rack_size))
+            #          for (_, putdown) in self.all_gets_w_putdowns.values()]
+            #terms += [up.Implies(putdown.present, up.LE(putdown.get_parameter("rs"), max_allowed_rack_size))
+            #          for (_, putdown) in self.all_swap_pickups_n_putdowns.values()]
+            terms += [up.Implies(putdown.present, up.LE(putdown.get_parameter("rs"), max_allowed_rack_size))
+                      for putdown in self.all_putdowns]
 
-    pbb = beluga_model.pb.clone()
-    pbb.epsilon = 1
-
-    struct_constrs = _make_plan_structural_constraints(
-        struct_vars_plan_assignments,
-        struct_map_plan_action_to_subtask,
-        all_non_swap_subtasks_not_required_by_plan,
-    )
-    for c in struct_constrs:
-        pbb.task_network.add_constraint(c)
-
-    pll = solve_problem(pbb, None)
-    # up_plot.plot_time_triggered_plan(pll.action_plan, figsize=(26.0, 8.0))
-
-    # putdown delay (full jigs)
-
-    pref_putdown_full_delay = {}
-
-    for (unload_st, putdown_st) in beluga_model.all_unloads:
-        (t1, unload_a) = [(t, a) for (t, a, d) in pll.action_plan.timed_actions if a == pll.decomposition.subtasks[unload_st.identifier]][0]
-        jig = unload_a.actual_parameters[0].object()
-        aux = [(t, a) for (t, a, d) in pll.action_plan.timed_actions if a == pll.decomposition.subtasks[putdown_st.identifier].decomposition.subtasks.get("_t1", None)] # type: ignore
-        if len(aux) > 0:
-            assert len(aux) == 1
-            (t2, putdown_a) = aux[0]
-            pref_putdown_full_delay[jig] = (t2 - t1).numerator # WARNING we allow ourselves to do this because we ensure epsilon = 1
-        # else:
-        #     pref_putdown_full_delay[jig] = 1000
-    
-    # putdown delay (empty jigs)
-
-    pref_putdown_empty_delay = {}
-
-    for (get_st, putdown_st) in beluga_model.all_gets:
-        aux1 = [(t, a) for (t, a, d) in pll.action_plan.timed_actions if a == pll.decomposition.subtasks[get_st.identifier].decomposition.subtasks.get("_t2", None)] # type: ignore
-        if len(aux1) > 0:
-            assert len(aux1) == 1
-            (t1, get_a) = aux1[0]
-            jig = get_a.actual_parameters[0].object()
-            aux2 = [(t, a) for (t, a, d) in pll.action_plan.timed_actions if a == pll.decomposition.subtasks[putdown_st.identifier].decomposition.subtasks.get("_t2", None)] # type: ignore
-            if len(aux2) > 0:
-                assert len(aux2) == 1
-                (t2, putdown_a) = aux2[0]
-                if putdown_st.parameters[2].parameter() in struct_vars_plan_assignments:
-                    pref_putdown_empty_delay[jig] = (t2 - t1).numerator # WARNING we allow ourselves to do this because we ensure epsilon = 1
-    
-    # # #
-
-    # print(at_least_one_rack_always_empty)
-    # print(rack_always_empty)
-    # print(always_jigs_of_same_type_on_rack)
-    # print(max_rack_size_used_for_jig)
-    # print(putdown_full_delay)
-    # print(putdown_empty_delay)
-
-    ##### End #####
-
-    return BelugaPlanProblemMatching(
-        struct_vars_plan_assignments,
-        struct_map_plan_action_to_subtask,
-        struct_map_plan_action_to_subtask_inv,
-        pref_at_least_one_rack_always_empty,
-        pref_rack_always_empty,
-        # pref_always_jigs_of_same_type_on_rack,
-        pref_max_rack_size_used_for_jig,
-        pref_putdown_full_delay,
-        pref_putdown_empty_delay,
-        all_non_swap_subtasks_not_required_by_plan,
-    )
-
-def make_plan_structural_constraints(
-    plan_problem_matching: BelugaPlanProblemMatching
-) -> list[up.BoolExpression]:
-    return _make_plan_structural_constraints(
-        plan_problem_matching.struct_vars_plan_assignments,
-        plan_problem_matching.struct_map_plan_action_to_subtask,
-        plan_problem_matching.all_non_swap_subtasks_not_required_by_plan
-    )
-
-def _make_plan_structural_constraints(
-    struct_vars_plan_assignments,
-    struct_map_plan_action_to_subtask,
-    all_non_swap_subtasks_not_required_by_plan,
-) -> list[up.BoolExpression]:
-
-    def make_total_order_constraints():
-        constrs = []
-        prev = None
-        for _, v in sorted(struct_map_plan_action_to_subtask.items()):
-            #print("--- ",v)
-            if isinstance(v, up_htn.Subtask):
-                st: up_htn.Subtask = v
-                if prev is not None:
-                    constrs.append(up.LT(prev, st.start)) # FIXME LE/LT?
-                prev = st.start
-            elif isinstance(v, tuple):
-                st: up_htn.Subtask = v[1]
-                if v[0] == False:
-                    if prev is not None:
-                        constrs.append(up.LT(prev, st.start)) # FIXME LE/LT?
-                    prev = st.start
-                else:
-                    if prev is not None:
-                        constrs.append(up.LT(prev, st.parameters[8].parameter()))
-                    prev = st.parameters[9].parameter()
-
-        # Force actions that were not required by the reference plan (whose analysed structure we use in this function) to be after all the required ones.
-        # This could be the case of actions that retrieve an empty jig to the beluga side, even though the jig does not need to be loaded into an outgoing Beluga.
-        # Our model forces these actions to be there, but they are not required in the reference plans given to us.
-        for st in all_non_swap_subtasks_not_required_by_plan:
-            constrs.append(up.LT(prev, st.start))
-
-        return constrs
-
-    constrs = make_total_order_constraints()
-    for var, val in struct_vars_plan_assignments.items():
-        if var.type == up.BoolType():
-            constrs.append(var if val == up.TRUE() else up.Not(var))
-        else:
-            constrs.append(up.Equals(var, val)) # APPARENTLY, CAUSED A BUG!... EXAMPLE_SAT_QUESTIONS0...
-
-    return constrs
-    
-def apply_plan_structural_constraints_to_problem(
-    pb: up_htn.HierarchicalProblem,
-    plan_problem_matching: BelugaPlanProblemMatching
-):
-    constrs = make_plan_structural_constraints(plan_problem_matching)
-    for c in constrs:
-        pb.task_network.add_constraint(c)
-
-def reify_conjunction_of_plan_structural_constraints(
-    pb: up_htn.HierarchicalProblem,
-    plan_problem_matching: BelugaPlanProblemMatching
-) -> up.Parameter:
-    if "is_ref_plan" in pb.task_network._variables:
-        is_ref_plan = pb.task_network.parameter("is_ref_plan")
-    else:
-        is_ref_plan = pb.task_network.add_variable("is_ref_plan", up.BoolType())
-    constrs = make_plan_structural_constraints(plan_problem_matching)
-    pb.task_network.add_constraint(
-        up.Or(
-            up.And(is_ref_plan, up.And(constrs)),
-            up.And(up.Not(is_ref_plan), up.Not(up.And(constrs))),
-        )
-    )
-    return is_ref_plan
-
-def reify_at_least_one_rack_always_empty(
-    beluga_model: BelugaModel,
-) -> up.Parameter:
-
-    if "at_least_one_rack_always_empty" in beluga_model.pb.task_network._variables:
-        at_least_one_rack_always_empty = beluga_model.pb.task_network.parameter("at_least_one_rack_always_empty")
-    else:
-        at_least_one_rack_always_empty = beluga_model.pb.task_network.add_variable("at_least_one_rack_always_empty", up.BoolType())
-
-        rack_always_empty_list = []
-        for rack in beluga_model.pb_def.racks:
-            rack_always_empty_list.append(reify_rack_always_empty(beluga_model, rack.name))
-
-        beluga_model.pb.task_network.add_constraint(
-            up.Or(
-                up.And(at_least_one_rack_always_empty, up.Or([r_always_empty for r_always_empty in rack_always_empty_list])),
-                up.And(up.Not(at_least_one_rack_always_empty), up.Not(up.Or([r_always_empty for r_always_empty in rack_always_empty_list]))),
-            )
-        )
-    return at_least_one_rack_always_empty
-
-def reify_rack_always_empty(
-    beluga_model: BelugaModel,
-    rack_name:str,
-) -> up.Parameter:
-
-    all_rack_putdown_vars = list(beluga_model.unloads_rack_vars.values())
-    all_rack_putdown_vars += list(beluga_model.gets_rack_vars.values())
-    all_rack_putdown_vars += list(beluga_model.swaps_rack2_vars.values())
-
-    rack_initially_empty = up.Bool(beluga_model.pb.explicit_initial_values[beluga_model.rack_free_space(beluga_model.rack_objects[rack_name])] == beluga_model.pb.explicit_initial_values[beluga_model.rack_size(beluga_model.rack_objects[rack_name])])
-
-    if f"{rack_name}_always_empty" in beluga_model.pb.task_network._variables:
-        r_always_empty = beluga_model.pb.task_network.parameter(f"{rack_name}_always_empty",)
-    else:
-        r_always_empty = beluga_model.pb.task_network.add_variable(f"{rack_name}_always_empty", up.BoolType())
-
-        beluga_model.pb.task_network.add_constraint(
-            up.Or(
-                up.And(up.Not(r_always_empty), up.Or([up.Not(rack_initially_empty)]+[up.Equals(var_, beluga_model.rack_objects[rack_name]) for var_ in all_rack_putdown_vars])),
-                up.And(r_always_empty, up.And([rack_initially_empty]+[up.Not(up.Equals(var_, beluga_model.rack_objects[rack_name])) for var_ in all_rack_putdown_vars])),
-            )
-        )
-    return r_always_empty
-
-def reify_jig_always_placed_on_rack_shorter_or_same_size_as(beluga_model: BelugaModel, jig_name:str, max_allowed_rack_size:int) -> up.Parameter:
-    terms = []
-
-    if f"{jig_name}_always_placed_on_rack_shorter_or_same_size_as" in beluga_model.pb.task_network._variables:
-        jig_always_placed_on_rack_shorter_or_same_size_as = beluga_model.pb.task_network.parameter(f"{jig_name}_always_placed_on_rack_shorter_or_same_size_as",)
-    else:
-        jig_always_placed_on_rack_shorter_or_same_size_as = beluga_model.pb.task_network.add_variable(f"{jig_name}_always_placed_on_rack_shorter_or_same_size_as", up.BoolType())
-
-        jig_initially_at = beluga_model.pb.explicit_initial_values.get(beluga_model.at(beluga_model.jig_objects[jig_name]), None)
-        if jig_initially_at is not None:
-            jig_initially_at = jig_initially_at.object()
-            # if the initial location of the jig is actually a rack
-            if (jig_initially_at in beluga_model.rack_objects.values()
-                and beluga_model.rack_size(jig_initially_at) in beluga_model.pb.explicit_initial_values
-            ):
-                terms += [up.LE(beluga_model.pb.explicit_initial_values[beluga_model.rack_size(jig_initially_at)], max_allowed_rack_size)]
-
-        if jig_name in beluga_model.unloads_used_rack_size_vars:
-            terms += [up.LE(beluga_model.unloads_used_rack_size_vars[jig_name], max_allowed_rack_size)]
-        if jig_name in beluga_model.gets_used_rack_size_vars:
-            terms += [up.LE(beluga_model.gets_used_rack_size_vars[jig_name], max_allowed_rack_size)]
-        assert len(terms) > 0
-        
-        for id_swap in beluga_model.swaps_used_rack_size_vars:
-            terms += [
-                up.Or(
-                    up.Not(up.Equals(beluga_model.swaps_jig_vars[id_swap], beluga_model.jig_objects[jig_name])),
-                    up.LE(beluga_model.swaps_used_rack_size_vars[id_swap], max_allowed_rack_size),
-                )
-            ]
-        
-        beluga_model.pb.task_network.add_constraint(
-            up.Or(
-                up.And(jig_always_placed_on_rack_shorter_or_same_size_as, up.And(terms)),
-                up.And(up.Not(jig_always_placed_on_rack_shorter_or_same_size_as), up.Not(up.And(terms))),
-            )
-        )
-
-    return jig_always_placed_on_rack_shorter_or_same_size_as
-
-def reify_num_swaps_used_leq(
-    beluga_model: BelugaModel,
-    val: int,
-) -> up.Parameter:
-
-    if f"num_swaps_used_leq_{val}" in beluga_model.pb.task_network._variables:
-        num_swaps_used_leq_val = beluga_model.pb.task_network.parameter(f"num_swaps_used_leq_{val}")
-    else:
-        num_swaps_used_leq_val = beluga_model.pb.task_network.add_variable(f"num_swaps_used_leq_{val}", up.BoolType())
-
-        beluga_model.pb.task_network.add_constraint(
-            up.Or(
-                up.And(num_swaps_used_leq_val,
-                        up.LE(beluga_model.num_used_swaps, val)),
-                up.And(up.Not(num_swaps_used_leq_val),
-                        up.GT(beluga_model.num_used_swaps, val)),
-            )
-        )
-    return num_swaps_used_leq_val
-""" 
-def reify_satisfaction_of_ref_plan_prefs_in_problem(
-    beluga_model: BelugaModel,
-    plan_pb_matching: BelugaPlanProblemMatching,
-):# -> tuple[
-#    up.Parameter,
-#    dict[up.Object, up.Parameter],
-#    dict[up.Object, up.Parameter],
-#    dict[up.Object, up.Parameter],
-#    up.Parameter, 
-#    up.Parameter,
-#]:
-
-    def reify_jig_always_placed_on_rack_shorter_or_same_size_as(jig_name:str, max_allowed_rack_size:int) -> up.Parameter:
-        terms = []
-
-        if f"{jig_name}_always_placed_on_rack_shorter_or_same_size_as" in beluga_model.pb.task_network._variables:
-            jig_always_placed_on_rack_shorter_or_same_size_as = beluga_model.pb.task_network.parameter(f"{jig_name}_always_placed_on_rack_shorter_or_same_size_as",)
-        else:
-            jig_always_placed_on_rack_shorter_or_same_size_as = beluga_model.pb.task_network.add_variable(f"{jig_name}_always_placed_on_rack_shorter_or_same_size_as", up.BoolType())
-
-            jig_initially_at = beluga_model.pb.explicit_initial_values.get(beluga_model.at(beluga_model.jig_objects[jig_name]), None)
-            if jig_initially_at is not None:
-                jig_initially_at = jig_initially_at.object()
-                # if the initial location of the jig is actually a rack
-                if (jig_initially_at in beluga_model.rack_objects.values()
-                    and beluga_model.rack_size(jig_initially_at) in beluga_model.pb.explicit_initial_values
-                ):
-                    terms += [up.LE(beluga_model.pb.explicit_initial_values[beluga_model.rack_size(jig_initially_at)], max_allowed_rack_size)]
-
-            if jig_name in beluga_model.unloads_used_rack_size_vars:
-                terms += [up.LE(beluga_model.unloads_used_rack_size_vars[jig_name], max_allowed_rack_size)]
-            if jig_name in beluga_model.gets_used_rack_size_vars:
-                terms += [up.LE(beluga_model.gets_used_rack_size_vars[jig_name], max_allowed_rack_size)]
-            assert len(terms) > 0
-            
-            for id_swap in beluga_model.swaps_used_rack_size_vars:
-                terms += [
-                    up.Or(
-                        up.Not(up.Equals(beluga_model.swaps_jig_vars[id_swap], beluga_model.jig_objects[jig_name])),
-                        up.LE(beluga_model.swaps_used_rack_size_vars[id_swap], max_allowed_rack_size),
-                    )
-                ]
-            
-            beluga_model.pb.task_network.add_constraint(
-                up.Or(
-                    up.And(jig_always_placed_on_rack_shorter_or_same_size_as, up.And(terms)),
-                    up.And(up.Not(jig_always_placed_on_rack_shorter_or_same_size_as), up.Not(up.And(terms))),
-                )
-            )
+            self.pb.add_constraint(up.Iff(jig_always_placed_on_rack_shorter_or_same_size_as, up.And(terms)))
 
         return jig_always_placed_on_rack_shorter_or_same_size_as
 
-    def reify_max_delay_putdown_full_le(jig_name:str, max_allowed_delay:int) -> up.Parameter:
-        if f"{jig_name}_max_delay_putdown_full_le_{max_allowed_delay}" in beluga_model.pb.task_network._variables:
-            max_delay_putdown_full_le = beluga_model.pb.task_network.parameter(f"{jig_name}_max_delay_putdown_full_le_{max_allowed_delay}",)
+    def _reify_prop_num_swaps_used_leq_val(
+        self,
+        val: int,
+        prop_id: PropId | None,
+    ) -> up.Parameter:
+
+        reif_name = f"prop_{prop_id}_num_swaps_used_leq_{val}" if prop_id is not None else f"num_swaps_used_leq_{val}"
+
+        if reif_name in self.pb.base_variables:
+            num_swaps_used_leq_val = self.pb.get_variable(reif_name)
         else:
-            max_delay_putdown_full_le = beluga_model.pb.task_network.add_variable(f"{jig_name}_max_delay_putdown_full_le_{max_allowed_delay}", up.BoolType())
+            num_swaps_used_leq_val = self.pb.add_variable(reif_name, up.BoolType())
 
-            beluga_model.pb.task_network.add_constraint(
-                up.Or(
-                    up.And(max_delay_putdown_full_le, up.LE(beluga_model.unloads_max_putdown_delay_vars[jig_name], max_allowed_delay)),
-                    up.And(up.Not(max_delay_putdown_full_le), up.GT(beluga_model.unloads_max_putdown_delay_vars[jig_name], max_allowed_delay)),
-                )
-            )
-        return max_delay_putdown_full_le
- 
-    def reify_max_delay_putdown_empty_le(jig_name:str, max_allowed_delay:int) -> up.Parameter:
-        if f"{jig_name}_max_delay_putdown_empty_le_{max_allowed_delay}" in beluga_model.pb.task_network._variables:
-            max_delay_putdown_empty_le = beluga_model.pb.task_network.parameter(f"{jig_name}_max_delay_putdown_empty_le_{max_allowed_delay}",)
+            self.pb.add_constraint(up.Iff(num_swaps_used_leq_val, up.LE(self.num_used_swaps, val)))
+
+        return num_swaps_used_leq_val
+
+    def _reify_prop_jig_never_on_rack(
+        self,
+        jig_name: str,
+        rack_name: str,
+        prop_id: PropId | None,
+    ) -> up.Parameter:
+
+        reif_name = f"prop_{prop_id}_{jig_name}_never_on_{rack_name}"
+
+        if reif_name in self.pb.base_variables:
+            jig_never_on_rack = self.pb.get_variable(reif_name)
         else:
-            max_delay_putdown_empty_le = beluga_model.pb.task_network.add_variable(f"{jig_name}_max_delay_putdown_empty_le_{max_allowed_delay}", up.BoolType())
+            jig_never_on_rack = self.pb.add_variable(reif_name, up.BoolType())
 
-            beluga_model.pb.task_network.add_constraint(
-                up.Or(
-                    up.And(max_delay_putdown_empty_le, up.LE(beluga_model.gets_max_putdown_delay_vars[jig_name], max_allowed_delay)),
-                    up.And(up.Not(max_delay_putdown_empty_le), up.GT(beluga_model.gets_max_putdown_delay_vars[jig_name], max_allowed_delay)),
-                )
-            )
-        return max_delay_putdown_empty_le
+            terms = []
 
-    # # #
+            _temp = self.pb.explicit_initial_values.get(self.at(self.jig_objects[jig_name]), None)
+            if _temp is not None and _temp.object() in self.rack_objects.values(): # (if initially at a rack, and not a beluga for example)
+                rack_jig_is_initially_at = _temp.object()
+            else:
+                rack_jig_is_initially_at = None
 
-    if "ref_plan_pref_sat_at_least_one_rack_always_empty" in beluga_model.pb.task_network._variables:
-        ref_plan_pref_sat_at_least_one_rack_always_empty = beluga_model.pb.task_network.parameter("ref_plan_pref_sat_at_least_one_rack_always_empty")
-    else:
-        ref_plan_pref_sat_at_least_one_rack_always_empty = beluga_model.pb.task_network.add_variable("ref_plan_pref_sat_at_least_one_rack_always_empty", up.BoolType())
+            if rack_jig_is_initially_at is not None:
+                terms += [up.Not(up.Equals(rack_jig_is_initially_at, self.rack_objects[rack_name]))]
 
-        iff_workaround = up.Or(
-            up.And(reify_at_least_one_rack_always_empty(beluga_model), up.Bool(plan_pb_matching.pref_at_least_one_rack_always_empty)),
-            up.And(up.Not(reify_at_least_one_rack_always_empty(beluga_model)), up.Not(up.Bool(plan_pb_matching.pref_at_least_one_rack_always_empty))),
-        )
-        beluga_model.pb.task_network.add_constraint(
-            up.Or(
-                up.And(ref_plan_pref_sat_at_least_one_rack_always_empty, iff_workaround),
-                up.And(up.Not(ref_plan_pref_sat_at_least_one_rack_always_empty), up.Not(iff_workaround)),
-            )
-        )
+            #terms += [up.Implies(putdown.present,
+            #                     up.Implies(up.Equals(putdown.get_parameter("j"), self.jig_objects[jig_name]),
+            #                                up.Not(up.Equals(putdown.get_parameter("r"), self.rack_objects[rack_name]))))
+            #          for (_, putdown) in self.all_unloads_w_putdowns.values()]
+            #terms += [up.Implies(putdown.present,
+            #                     up.Implies(up.Equals(putdown.get_parameter("j"), self.jig_objects[jig_name]),
+            #                                up.Not(up.Equals(putdown.get_parameter("r"), self.rack_objects[rack_name]))))
+            #          for (_, putdown) in self.all_gets_w_putdowns.values()]
+            #terms += [up.Implies(putdown.present,
+            #                     up.Implies(up.Equals(putdown.get_parameter("j"), self.jig_objects[jig_name]),
+            #                                up.Not(up.Equals(putdown.get_parameter("r"), self.rack_objects[rack_name]))))
+            #          for (_, putdown) in self.all_swap_pickups_n_putdowns.values()]
+            
+            terms += [up.Implies(putdown.present,
+                                 up.Implies(up.Equals(putdown.get_parameter("j"), self.jig_objects[jig_name]),
+                                            up.Not(up.Equals(putdown.get_parameter("r"), self.rack_objects[rack_name]))))
+                      for putdown in self.all_putdowns]
 
-    # # #
+            self.pb.add_constraint(up.Iff(jig_never_on_rack, up.And(terms)))
 
-    ref_plan_pref_sat_reify_rack_always_empty: dict[up.Object, up.Parameter] = {}
+        return jig_never_on_rack
 
-    for rack in plan_pb_matching.pref_rack_always_empty:
-        rack_name = rack.name
+    def _reify_prop_jig_only_if_ever_on_rack(
+        self,
+        jig_name: str,
+        rack_name: str,
+        prop_id: PropId | None,
+    ) -> up.Parameter:
+        """
+        Ideally (for performance) this should be called after all `_reify_prop_jig_never_on_rack` have been called.
+        """
 
-        if f"ref_plan_pref_sat_{rack_name}_always_empty" in beluga_model.pb.task_network._variables:
-            ref_plan_pref_sat_reify_rack_always_empty[rack] = beluga_model.pb.task_network.parameter(f"ref_plan_pref_sat_{rack_name}_always_empty")
+        reif_name = f"prop_{prop_id}_{jig_name}_only_if_ever_on_{rack_name}"
+
+        if reif_name in self.pb.base_variables:
+            jig_only_if_ever_on_rack = self.pb.get_variable(reif_name)
         else:
-            ref_plan_pref_sat_reify_rack_always_empty[rack] = beluga_model.pb.task_network.add_variable(f"ref_plan_pref_sat_{rack_name}_always_empty", up.BoolType())
+            jig_only_if_ever_on_rack = self.pb.add_variable(reif_name, up.BoolType())
+
+            terms = []
+            for _r in self.pb_def.racks:
+                if rack_name == _r.name:
+                    continue
+
+                found_among_props_jig_never_on_rack = False
+                for (pid, (jn, rn)) in self.pb_def.props_jig_never_on_rack:
+                    if jn == jig_name and rn == _r.name:
+                        terms += [self._reify_prop_jig_never_on_rack(jig_name, _r.name, pid)]
+                        found_among_props_jig_never_on_rack = True
+                        break
+                if not found_among_props_jig_never_on_rack:
+                    terms += [self._reify_prop_jig_never_on_rack(jig_name, _r.name, None)]
+
+            # "jig only if ever on rack" encoded as "jig never on any other racks"
+            self.pb.add_constraint(up.Iff(jig_only_if_ever_on_rack, up.And(terms)))
+
+        return jig_only_if_ever_on_rack
+
+    def _reify_prop_jig_to_production_line_order(
+        self,
+        jig1_name: str,
+        pl1_name: str,
+        jig2_name: str,
+        pl2_name: str,
+        prop_id: PropId | None,
+    ) -> up.Parameter:
         
-            iff_workaround = up.Or(
-                up.And(reify_rack_always_empty(beluga_model, rack_name), up.Bool(plan_pb_matching.pref_rack_always_empty[rack])),
-                up.And(up.Not(reify_rack_always_empty(beluga_model, rack_name)), up.Not(up.Bool(plan_pb_matching.pref_rack_always_empty[rack]))),
-            )
-            beluga_model.pb.task_network.add_constraint(
-                up.Or(
-                    up.And(ref_plan_pref_sat_reify_rack_always_empty[rack], iff_workaround),
-                    up.And(up.Not(ref_plan_pref_sat_reify_rack_always_empty[rack]), up.Not(iff_workaround)),
-                )
-            )
+        reif_name = f"prop_{prop_id}_jig_to_production_line_order_{jig1_name}_{pl1_name}_{jig2_name}_{pl2_name}"
 
-    # # #
-
-    ref_plan_pref_sat_jig_always_placed_on_rack_shorter_or_same_size_as: dict[up.Object, up.Parameter] = {}
-
-    for jig in plan_pb_matching.pref_max_rack_size_used_for_jig:
-        jig_name = jig.name
-
-        if f"ref_plan_pref_sat_{jig_name}_always_placed_on_rack_shorter_or_same_size_as" in beluga_model.pb.task_network._variables:
-            ref_plan_pref_sat_jig_always_placed_on_rack_shorter_or_same_size_as[jig] = beluga_model.pb.task_network.parameter(f"ref_plan_pref_sat_{jig_name}_always_placed_on_rack_shorter_or_same_size_as")
+        if reif_name in self.pb.base_variables:
+            j1_delivered_to_pl1_before_j2_delivered_to_pl2 = self.pb.get_variable(reif_name)
         else:
-            ref_plan_pref_sat_jig_always_placed_on_rack_shorter_or_same_size_as[jig] = beluga_model.pb.task_network.add_variable(f"ref_plan_pref_sat_{jig_name}_always_placed_on_rack_shorter_or_same_size_as", up.BoolType())
-            beluga_model.pb.task_network.add_constraint(
-                up.Or(
-                    up.And(ref_plan_pref_sat_jig_always_placed_on_rack_shorter_or_same_size_as[jig],
-                        reify_jig_always_placed_on_rack_shorter_or_same_size_as(jig_name, plan_pb_matching.pref_max_rack_size_used_for_jig[jig])),
-                    up.And(up.Not(ref_plan_pref_sat_jig_always_placed_on_rack_shorter_or_same_size_as[jig]),
-                        up.Not(reify_jig_always_placed_on_rack_shorter_or_same_size_as(jig_name, plan_pb_matching.pref_max_rack_size_used_for_jig[jig]))),
-                )
-            )
+            j1_delivered_to_pl1_before_j2_delivered_to_pl2 = self.pb.add_variable(reif_name, up.BoolType())
 
-    # # #
+            deliver1_a = None
+            deliver2_a = None
+            for (jn, pln, _), (deliver_a, _) in self.all_delivers_w_pickups.items():
+                if jn == jig1_name and pln == pl1_name:
+                    deliver1_a = deliver_a
+                if jn == jig2_name and pln == pl2_name:
+                    deliver2_a = deliver_a
 
-    ref_plan_pref_sat_max_delay_putdown_full: dict[up.Object, up.Parameter] = {}
+            assert deliver1_a is not None and deliver2_a is not None
+            self.pb.add_constraint(up.LE(deliver1_a.end, deliver2_a.start), scope=[deliver1_a.present, deliver2_a.present])
 
-    for jig in plan_pb_matching.pref_putdown_full_delay:
-        jig_name = jig.name
+        return j1_delivered_to_pl1_before_j2_delivered_to_pl2
 
-        if f"ref_plan_pref_sat_{jig_name}_max_delay_putdown_full" in beluga_model.pb.task_network._variables:
-            ref_plan_pref_sat_max_delay_putdown_full[jig] = beluga_model.pb.task_network.parameter(f"ref_plan_pref_sat_{jig_name}_max_delay_putdown_full")
+    def _reify_prop_jig_to_rack_order(
+        self,
+        jig1_name: str,
+        rack1_name: str,
+        jig2_name: str,
+        rack2_name: str,
+        prop_id: PropId | None,
+    ) -> up.Parameter:
+
+        reif_name = f"prop_{prop_id}_reify_prop_jig_to_rack_order_{jig1_name}_{rack1_name}_{jig2_name}_{rack2_name}"
+
+        if reif_name in self.pb.base_variables:
+            jig1_putdown_on_rack1_before_jig2_putdown_on_rack2 = self.pb.get_variable(reif_name)
         else:
-            ref_plan_pref_sat_max_delay_putdown_full[jig] = beluga_model.pb.task_network.add_variable(f"ref_plan_pref_sat_{jig_name}_max_delay_putdown_full", up.BoolType())
+            jig1_putdown_on_rack1_before_jig2_putdown_on_rack2 = self.pb.add_variable(reif_name, up.BoolType())
 
-            beluga_model.pb.task_network.add_constraint(
-                up.Or(
-                    up.And(ref_plan_pref_sat_max_delay_putdown_full[jig],
-                        reify_max_delay_putdown_full_le(jig_name, plan_pb_matching.pref_putdown_full_delay[jig])),
-                    up.And(up.Not(ref_plan_pref_sat_max_delay_putdown_full[jig]),
-                        up.Not(reify_max_delay_putdown_full_le(jig_name, plan_pb_matching.pref_putdown_full_delay[jig]))),
-                )
-            )
+            all_putdowns = []
+            #all_putdowns += [putdown_a for _, putdown_a in self.all_unloads_w_putdowns.values()]
+            #all_putdowns += [putdown_a for _, putdown_a in self.all_gets_w_putdowns.values()]
+            #all_putdowns += [putdown_a for _, putdown_a in self.all_swap_pickups_n_putdowns.values()]
+            all_putdowns = self.all_putdowns
 
-    # # #
+            for putdown1_a in all_putdowns:
+                for putdown2_a in all_putdowns:
+                    self.pb.add_constraint(
+                        up.Implies(
+                            up.And(
+                                up.Equals(putdown1_a.get_parameter("j"), self.rack_objects[jig1_name]),
+                                up.Equals(putdown1_a.get_parameter("r"), self.rack_objects[rack1_name]),
+                                up.Equals(putdown2_a.get_parameter("j"), self.rack_objects[jig2_name]),
+                                up.Equals(putdown2_a.get_parameter("r"), self.rack_objects[rack2_name]),
+                            ),
+                            up.Iff(jig1_putdown_on_rack1_before_jig2_putdown_on_rack2, up.LT(putdown1_a.end, putdown2_a.start))
+                        ),
+                        scope=[putdown1_a.present, putdown2_a.present]
+                    )
 
-    ref_plan_pref_sat_max_delay_putdown_empty: dict[up.Object, up.Parameter] = {}
+        return jig1_putdown_on_rack1_before_jig2_putdown_on_rack2
 
-    for jig in plan_pb_matching.pref_putdown_empty_delay:
-        jig_name = jig.name
+    def _reify_prop_jig_to_production_line_before_flight(
+        self,
+        jig_name: str,
+        pl_name: str,
+        beluga_name: str,
+        prop_id: PropId | None,
+    ) -> up.Parameter:
 
-        if f"ref_plan_pref_sat_{jig_name}_max_delay_putdown_empty" in beluga_model.pb.task_network._variables:
-            ref_plan_pref_sat_max_delay_putdown_empty[jig] = beluga_model.pb.task_network.parameter(f"ref_plan_pref_sat_{jig_name}_max_delay_putdown_empty")
+        reif_name = f"prop_{prop_id}_reify_prop_jig_to_production_line_before_flight_{jig_name}_{pl_name}_{beluga_name}"
+
+        if reif_name in self.pb.base_variables:
+            jig_delivered_to_pl_before_flight = self.pb.get_variable(reif_name)
         else:
-            ref_plan_pref_sat_max_delay_putdown_empty[jig] = beluga_model.pb.task_network.add_variable(f"ref_plan_pref_sat_{jig_name}_max_delay_putdown_empty", up.BoolType())
+            jig_delivered_to_pl_before_flight = self.pb.add_variable(reif_name, up.BoolType())
 
-            beluga_model.pb.task_network.add_constraint(
-                up.Or(
-                    up.And(ref_plan_pref_sat_max_delay_putdown_empty[jig],
-                        reify_max_delay_putdown_empty_le(jig_name, plan_pb_matching.pref_putdown_empty_delay[jig])),
-                    up.And(up.Not(ref_plan_pref_sat_max_delay_putdown_empty[jig]),
-                        up.Not(reify_max_delay_putdown_empty_le(jig_name, plan_pb_matching.pref_putdown_empty_delay[jig]))),
-                )
-            )
+            deliver_a = None
+            for (jn, pln, _), (_deliver_a, _) in self.all_delivers_w_pickups.items():
+                if jn == jig_name and pln == pl_name:
+                    deliver_a = _deliver_a
+                    break
+            proceed_a = None # FIXME TODO !!! what if the 1st flight is selected ? nothing can be before it and there is no corresponding "proceed" action... 
+            for bn, _proceed_a in self.all_proceeds_to_next_flight:
+                if bn == beluga_name:
+                    proceed_a = _proceed_a
+                    break
 
-    # # #
+            assert deliver_a is not None and proceed_a is not None
+            self.pb.add_constraint(up.LE(deliver_a.end, proceed_a.start), scope=[deliver_a.present, proceed_a.present])
 
-    num_used_swaps_in_ref_plan = plan_pb_matching.struct_vars_plan_assignments[beluga_model.num_used_swaps]
-
-    if f"ref_plan_pref_sat_num_used_swaps_leq_{num_used_swaps_in_ref_plan}" in beluga_model.pb.task_network._variables:
-        ref_plan_pref_sat_num_used_swaps_leq = beluga_model.pb.task_network.parameter(f"ref_plan_pref_sat_num_used_swaps_leq_{num_used_swaps_in_ref_plan}")
-    else:
-        ref_plan_pref_sat_num_used_swaps_leq = beluga_model.pb.task_network.add_variable(f"ref_plan_pref_sat_num_used_swaps_leq_{num_used_swaps_in_ref_plan}", up.BoolType())
-
-        beluga_model.pb.task_network.add_constraint(
-            up.Or(
-                up.And(ref_plan_pref_sat_num_used_swaps_leq,
-                        up.LE(beluga_model.num_used_swaps, num_used_swaps_in_ref_plan)),
-                up.And(up.Not(ref_plan_pref_sat_num_used_swaps_leq),
-                        up.GT(beluga_model.num_used_swaps, num_used_swaps_in_ref_plan)),
-            )
-        )
-
-    # # #
-
-    return (
-        ref_plan_pref_sat_at_least_one_rack_always_empty,
-        ref_plan_pref_sat_reify_rack_always_empty,
-        ref_plan_pref_sat_jig_always_placed_on_rack_shorter_or_same_size_as,
-        ref_plan_pref_sat_max_delay_putdown_full,
-        ref_plan_pref_sat_max_delay_putdown_empty,
-        ref_plan_pref_sat_num_used_swaps_leq,
-    )
- """
+        return jig_delivered_to_pl_before_flight
