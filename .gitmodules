@@ -1,0 +1,4 @@
+[submodule "aries-beluga"]
+	path = aries-beluga
+	url = https://github.com/plaans/aries
+	branch = beluga
