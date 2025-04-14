@@ -11,6 +11,7 @@ if __name__ == "__main__":
     output_folder = os.path.abspath(".") # os.path.abspath(sys.path[0])
     output_upp_path = os.path.join(output_folder, "problem/problem.upp")
     output_plan_path = os.path.join(output_folder, "plan/plan.json")
+    output_confls_path = os.path.join(output_folder, "conflicts/conflicts.json")
 
     rust_binary_path = os.path.abspath(".") # os.path.abspath(sys.path[0])
 
@@ -98,6 +99,7 @@ if __name__ == "__main__":
 
         base_filename = sys.argv[2]
         props_filename = sys.argv[3]
+        props_filename = sys.argv[3]
         test_pb_def = parse_problem_and_properties(base_filename, props_filename)
         print(test_pb_def)
         # full_problem_filename = sys.argv[2]
@@ -114,13 +116,13 @@ if __name__ == "__main__":
                 os.path.join(os.path.abspath(sys.path[0]), "beluga_rust"),
                 "explain",
                 output_upp_path,
-                "WHY_INFEASIBLE"
+                output_confls_path,
             ),
             stdout=subprocess.PIPE,
         )
         popen.wait()
-        output = popen.stdout.read() # type: ignore
-        print(output)
+        # output = popen.stdout.read() # type: ignore
+        # print(output)
 
         sys.exit(0)
 
