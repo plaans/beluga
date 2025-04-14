@@ -8,7 +8,7 @@ from model import *
 
 if __name__ == "__main__":
 
-    dir_name = os.path.dirname(os.path.abspath(__file__))
+    dir_name = os.path.abspath(os.getcwd())
 
     output_folder = os.path.join(dir_name, "output")
     output_upp_path = os.path.join(output_folder, "problem/problem.upp")
