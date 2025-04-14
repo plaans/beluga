@@ -8,12 +8,12 @@ from model import *
 
 if __name__ == "__main__":
 
-    output_folder = os.path.abspath(".") # os.path.abspath(sys.path[0])
+    dir_name = os.path.dirname(os.path.abspath(__file__))
+
+    output_folder = os.path.join(dir_name, "output")
     output_upp_path = os.path.join(output_folder, "problem/problem.upp")
     output_plan_path = os.path.join(output_folder, "plan/plan.json")
     output_confls_path = os.path.join(output_folder, "conflicts/conflicts.json")
-
-    rust_binary_path = os.path.abspath(".") # os.path.abspath(sys.path[0])
 
     if sys.argv[1] == "solve":
 
@@ -111,18 +111,36 @@ if __name__ == "__main__":
         serialize_problem(test_beluga_model.pb, output_upp_path)        
 
         import subprocess
+#        popen = subprocess.Popen(
+#            (
+#                os.path.join(dir_name, "beluga_rust"),
+#                "explain",
+#                output_upp_path,
+#                output_confls_path,
+#            ),
+#            stdout=subprocess.PIPE,
+#        )
         popen = subprocess.Popen(
             (
-                os.path.join(os.path.abspath(sys.path[0]), "beluga_rust"),
+                "cargo",
+                "run",
+                "--bin",
+                "beluga",
+                "--release",
                 "explain",
                 output_upp_path,
                 output_confls_path,
             ),
             stdout=subprocess.PIPE,
+            cwd=os.path.join(dir_name, "aries-beluga"),
         )
         popen.wait()
         # output = popen.stdout.read() # type: ignore
         # print(output)
+
+        with open(output_confls_path, 'r') as f:
+            conflicts_data = json.load(f)
+            print(conflicts_data)
 
         sys.exit(0)
 
