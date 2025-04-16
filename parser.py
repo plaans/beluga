@@ -120,9 +120,9 @@ def parse_problem(filename: str) -> BelugaProblemDef:
 
 def _parse_problem_base(d) -> BelugaProblemDef:
     pb_def = BelugaProblemDef(
-        trailers_beluga=[Trailer(t.name, t.jig if t.jig != "" else None) for t in d.trailers_beluga],
-        trailers_factory=[Trailer(t.name, t.jig if t.jig != "" else None) for t in d.trailers_factory],
-        hangars=[Hangar(h.name, h.jig if h.jig != "" else None) for h in d.hangars],
+        trailers_beluga=[Trailer(t.name, t.jig if hasattr(t, "jig") and t.jig != "" else None) for t in d.trailers_beluga],
+        trailers_factory=[Trailer(t.name, t.jig if hasattr(t, "jig") and t.jig != "" else None) for t in d.trailers_factory],
+        hangars=[Hangar(h, None) if isinstance(h, str) else Hangar(h.name, h.jig if hasattr(h, "jig") and h.jig != "" else None) for h in d.hangars],
         jig_types=[JigType(jt.name, jt.size_empty, jt.size_loaded) for jt in vars(d.jig_types).values()],
         racks=[Rack(r.name, r.size, r.jigs) for r in d.racks],
         jigs=[Jig(r.name, r.type, r.empty) for r in vars(d.jigs).values()],
@@ -139,9 +139,9 @@ def parse_problem_and_properties(problem_base_filename: str, problem_properties_
 
     with open(problem_base_filename) as f:
         d = json.load(f, object_hook=lambda d: SimpleNamespace(**d))
-        trailers_beluga=[Trailer(t.name, t.jig if t.jig != "" else None) for t in d.trailers_beluga]
-        trailers_factory=[Trailer(t.name, t.jig if t.jig != "" else None) for t in d.trailers_factory]
-        hangars=[Hangar(h.name, h.jig if h.jig != "" else None) for h in d.hangars]
+        trailers_beluga=[Trailer(t.name, t.jig if hasattr(t, "jig") and t.jig != "" else None) for t in d.trailers_beluga]
+        trailers_factory=[Trailer(t.name, t.jig if hasattr(t, "jig") and t.jig != "" else None) for t in d.trailers_factory]
+        hangars=[Hangar(h, None) if isinstance(h, str) else Hangar(h.name, h.jig if hasattr(h, "jig") and h.jig != "" else None) for h in d.hangars]
         jig_types=[JigType(jt.name, jt.size_empty, jt.size_loaded) for jt in vars(d.jig_types).values()]
         racks=[Rack(r.name, r.size, r.jigs) for r in d.racks]
         jigs=[Jig(r.name, r.type, r.empty) for r in vars(d.jigs).values()]
