@@ -96,7 +96,7 @@ class BelugaQuestion:
 
 # # #
 
-def parse_plan(filename: str) -> list[BelugaPlanAction] | None:
+def parse_plan(filename: str) -> BelugaPlanDef | None:
     with open(filename) as f:
         d = json.load(f, object_hook=lambda d: SimpleNamespace(**d))
     plan_def = _parse_plan(d)
