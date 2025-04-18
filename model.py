@@ -888,7 +888,7 @@ class BelugaModelOptSched:
 
         reif_name = f"{'hard' if prop_id in self.pb_def.props_ids_hard_list else ''}prop_{prop_id}_{rack_name}_always_empty" if prop_id is not None else f"{rack_name}_always_empty"
 
-        if reif_name in self.pb.base_variables:
+        if self.pb.has_name(reif_name):
             r_always_empty = self.pb.get_variable(reif_name)
         else:
             r_always_empty = self.pb.add_variable(reif_name, up.BoolType())
@@ -925,7 +925,7 @@ class BelugaModelOptSched:
 
         reif_name = f"{'hard' if prop_id in self.pb_def.props_ids_hard_list else ''}prop_{prop_id}_at_least_one_rack_always_empty" if prop_id is not None else f"at_least_one_rack_always_empty"
 
-        if reif_name in self.pb.base_variables:
+        if self.pb.has_name(reif_name):
             at_least_one_rack_always_empty = self.pb.get_variable(reif_name)
         else:
             at_least_one_rack_always_empty = self.pb.add_variable(reif_name, up.BoolType())
@@ -957,7 +957,7 @@ class BelugaModelOptSched:
 
         reif_name = f"{'hard' if prop_id in self.pb_def.props_ids_hard_list else ''}prop_{prop_id}_{jig_name}_always_placed_on_rack_shorter_or_same_size_as" if prop_id is not None else f"{jig_name}_always_placed_on_rack_shorter_or_same_size_as"
 
-        if reif_name in self.pb.base_variables:
+        if self.pb.has_name(reif_name):
             jig_always_placed_on_rack_shorter_or_same_size_as = self.pb.get_variable(reif_name)
         else:
             jig_always_placed_on_rack_shorter_or_same_size_as = self.pb.add_variable(reif_name, up.BoolType())
@@ -995,7 +995,7 @@ class BelugaModelOptSched:
 
         reif_name = f"{'hard' if prop_id in self.pb_def.props_ids_hard_list else ''}prop_{prop_id}_num_swaps_used_leq_{val}" if prop_id is not None else f"num_swaps_used_leq_{val}"
 
-        if reif_name in self.pb.base_variables:
+        if self.pb.has_name(reif_name):
             num_swaps_used_leq_val = self.pb.get_variable(reif_name)
         else:
             num_swaps_used_leq_val = self.pb.add_variable(reif_name, up.BoolType())
@@ -1013,7 +1013,7 @@ class BelugaModelOptSched:
 
         reif_name = f"{'hard' if prop_id in self.pb_def.props_ids_hard_list else ''}prop_{prop_id}_{jig_name}_never_on_{rack_name}"
 
-        if reif_name in self.pb.base_variables:
+        if self.pb.has_name(reif_name):
             jig_never_on_rack = self.pb.get_variable(reif_name)
         else:
             jig_never_on_rack = self.pb.add_variable(reif_name, up.BoolType())
@@ -1063,7 +1063,7 @@ class BelugaModelOptSched:
 
         reif_name = f"{'hard' if prop_id in self.pb_def.props_ids_hard_list else ''}prop_{prop_id}_{jig_name}_only_if_ever_on_{rack_name}"
 
-        if reif_name in self.pb.base_variables:
+        if self.pb.has_name(reif_name):
             jig_only_if_ever_on_rack = self.pb.get_variable(reif_name)
         else:
             jig_only_if_ever_on_rack = self.pb.add_variable(reif_name, up.BoolType())
@@ -1098,7 +1098,7 @@ class BelugaModelOptSched:
         
         reif_name = f"{'hard' if prop_id in self.pb_def.props_ids_hard_list else ''}prop_{prop_id}_jig_to_production_line_order_{jig1_name}_{pl1_name}_{jig2_name}_{pl2_name}"
 
-        if reif_name in self.pb.base_variables:
+        if self.pb.has_name(reif_name):
             j1_delivered_to_pl1_before_j2_delivered_to_pl2 = self.pb.get_variable(reif_name)
         else:
             j1_delivered_to_pl1_before_j2_delivered_to_pl2 = self.pb.add_variable(reif_name, up.BoolType())
@@ -1127,7 +1127,7 @@ class BelugaModelOptSched:
 
         reif_name = f"{'hard' if prop_id in self.pb_def.props_ids_hard_list else ''}prop_{prop_id}_reify_prop_jig_to_rack_order_{jig1_name}_{rack1_name}_{jig2_name}_{rack2_name}"
 
-        if reif_name in self.pb.base_variables:
+        if self.pb.has_name(reif_name):
             jig1_putdown_on_rack1_before_jig2_putdown_on_rack2 = self.pb.get_variable(reif_name)
         else:
             jig1_putdown_on_rack1_before_jig2_putdown_on_rack2 = self.pb.add_variable(reif_name, up.BoolType())
@@ -1165,7 +1165,7 @@ class BelugaModelOptSched:
 
         reif_name = f"{'hard' if prop_id in self.pb_def.props_ids_hard_list else ''}prop_{prop_id}_reify_prop_jig_to_production_line_before_flight_{jig_name}_{pl_name}_{beluga_name}"
 
-        if reif_name in self.pb.base_variables:
+        if self.pb.has_name(reif_name):
             jig_delivered_to_pl_before_flight = self.pb.get_variable(reif_name)
         else:
             jig_delivered_to_pl_before_flight = self.pb.add_variable(reif_name, up.BoolType())
