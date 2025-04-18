@@ -211,6 +211,11 @@ class BelugaModelOptSched:
         for (prop_id, (jig_name, pl_name, flight_name)) in self.pb_def.props_jig_to_production_line_before_flight:
             self._reify_prop_jig_to_production_line_before_flight(jig_name, pl_name, flight_name, prop_id)
         """
+
+        for v in self.pb.base_variables:
+            if v.name.startswith("hard_prop_"):
+                self.pb.add_constraint(v)
+
     def solve_with_properties(
         self,
         prop_ids: list[PropId],
