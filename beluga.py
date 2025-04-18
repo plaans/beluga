@@ -138,7 +138,7 @@ if __name__ == "__main__":
                 output_confls_path,
             ),
             stdout=subprocess.PIPE,
-            cwd=os.path.join(dir_name, "aries-beluga"),
+            cwd=os.path.join(os.path.abspath(os.path.dirname(__file__)), "aries-beluga"),
         )
         popen.wait()
         # output = popen.stdout.read() # type: ignore
