@@ -108,6 +108,10 @@ if __name__ == "__main__":
         # test_pb_def = parse_problem_full(full_problem_filename)
         # print(test_pb_def)
 
+        props_ids_hard_list = [] if len(sys.argv) < 5 else list(map(str, sys.argv[4].strip('[]').replace(" ","").split(',')))
+        test_pb_def.props_ids_hard_list = props_ids_hard_list
+        print(test_pb_def.props_ids_hard_list)
+
         num_available_swaps = int(os.environ.get('MAX_NUM_AVAILABLE_SWAPS', 10))
         test_beluga_model = BelugaModelOptSched(test_pb_def, base_filename+"_"+props_filename, num_available_swaps, None)
         serialize_problem(test_beluga_model.pb, output_upp_path)        

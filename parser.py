@@ -75,6 +75,8 @@ class BelugaProblemDef:
     props_jig_to_rack_order: list[tuple[PropId, tuple[str, str, str, str]]] = field(default_factory=lambda:[])
     props_jig_to_production_line_before_flight: list[tuple[PropId, tuple[str, str, str]]] = field(default_factory=lambda:[])
 
+    props_ids_hard_list: list[str] = field(default_factory=lambda:[])
+
     def get_jig_type(self, name: str) -> JigType:
         return next(x for x in self.jig_types if x.name == name)
 
