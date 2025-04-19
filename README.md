@@ -52,7 +52,7 @@ An example entry could be the following: `{ "name": "unload_beluga", "params": {
 List of considered / supported properties:
 
 - `unload_beluga(j, b, i)`: represents jig `j` being the `i`-th one to be unloaded from beluga `b`.
-- `load_beluga(j_or_jt, b, i)`: represents jig `j` being the `i`-th one to be loaded into beluga `b`.
+- `load_beluga(j, b, i)`: represents jig *or jig type* `j` being the `i`-th one to be loaded into beluga `b`.
 - `deliver_to_production_line(j, pl, i)`: represents jig `j` being the `i`-th one to be delivered to production line `pl`.
     - **NOTE**: for `unload_beluga(j, b, i)`, `load_beluga(j, b, i)`, and `deliver_to_production_line(j, pl, i)`, the ordinal `i` indicates a "relative" position in an order. For example, if we to unload only two jigs from the same beluga at "positions" `i_1 = 2` and `i_2 = 4`, they will be treated as the first and second one respectively. As a corollary, if `i = 4` and there is only one jig, everything will be the same as with `i = 0`.
 
