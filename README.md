@@ -1,3 +1,5 @@
+**WARNING**: The code in this repository could very well be quite unpolished !
+
 # Experiments with the Beluga planning domain
 
 This repository is dedicated to experiments on the [**Beluga**](https://github.com/TUPLES-Trustworthy-AI/Beluga-AI-Challenge) planning domain, using the [**Unified Planning (UP)**](https://unified-planning.readthedocs.io/en/latest/) library and [**Aries**](https://github.com/plaans/aries/blob/master/planning/unified/plugin/README.md) planning engine. At the moment of writing, the versions of UP and Aries that are used are in-development versions, not yet part of their main branches.
@@ -14,6 +16,21 @@ Three types of high-level tasks were investigated in this repository:
 
 TODO
 
+- **Planning**:
+    ```
+    TODO
+    ```
+
+- **Explaining**:
+    ```
+    TODO
+    ```
+
+- **Property checking**:
+    ```
+    TODO
+    ```
+
 ## The Beluga Domain
 
 TODO
@@ -22,12 +39,32 @@ TODO
 
 TODO
 
-### Properties Specification
+#### Legacy format
 
 TODO
 
+### Properties Specification
+
+Properties are specified in a JSON file containing a single list
+whose entries represent properties and follow the `{ "name": "xxx", "params": {...} }` format.
+An example entry could be the following: `{ "name": "unload_beluga", "params": { "j": "jig0001", "b": "beluga1", "i": 0 } }`.
+
 List of considered / supported properties:
-- TODO
+
+- `unload_beluga(j, b, i)`: represents jig `j` being the `i`-th one to be unloaded from beluga `b`.
+- `load_beluga(j_or_jt, b, i)`: represents jig `j` being the `i`-th one to be loaded into beluga `b`.
+- `deliver_to_production_line(j, pl, i)`: represents jig `j` being the `i`-th one to be delivered to production line `pl`.
+    - **NOTE**: for `unload_beluga(j, b, i)`, `load_beluga(j, b, i)`, and `deliver_to_production_line(j, pl, i)`, the ordinal `i` indicates a "relative" position in an order. For example, if we to unload only two jigs from the same beluga at "positions" `i_1 = 2` and `i_2 = 4`, they will be treated as the first and second one respectively. As a corollary, if `i = 4` and there is only one jig, everything will be the same as with `i = 0`.
+
+- `rack_always_empty(r)`: represents rack `r` never having a jig on itself (including initially).
+- `at_least_one_rack_always_empty`: represents at least one rack never having a jig on itself (including initially).
+- `jig_always_placed_on_rack_size_leq(j, sz)`: represents jig `j` never being okaced on rack of size strictly larger than `sz`.
+- `num_swaps_used_leq(n)`: represents `n` jig swaps being used at most.
+- `jig_never_on_rack(j, r)`: represents jig `j` never being placed on rack `r`.
+- `jig_only_if_ever_on_rack(j, r)`: represents jig `j` being either never placed on a rack, or only on rack `r`.
+- `jig_to_production_line_order(j1, pl1, j2, pl2)`: represents jig `j1` being delivered to production line `pl1` and `j2` being delivered to production_line `pl2`, in that order.
+- `jig_to_rack_order(j1, r1, j2, r2)`: represents jig `j1` being placed on rack `r1` and `j2` being placed on rack `r2`, in that order.
+- `jig_to_production_line_before_flight(j, pl, b)`: represents jig `j` being delivered to production line `pl`, before the arrival of beluga `b`.
 
 ## Property Checking
 
@@ -54,7 +91,30 @@ This has a direct impact on the matter of explainability, as will be touched upo
 
 ### Optional Scheduling Model
 
-TODO
+For every flight excluding the very first one, create a **non-optional** `switch_to_next_beluga` action.
+Constrain all these `switch_to_next_beluga` actions to be one after the other.
+
+For every incoming flight, and every concrete jig carried in it (processed in order):
+- Add an optional `unload_beluga` *action* as well as an optional `put_down_rack` action (on the beluga side of the rack system), and constrain them to be ordered.
+- Constrain the `unload_beluga` action to be between the previous (if it exists) and the next (if it exists) `switch_to_next_beluga` actions.
+- Constrain the `unload_beluga` action to be after *all* previous `unload_beluga` actions.
+
+NOTE: Since `unload_beluga` actions are optional, precedence constraints between two of them only hold when both are present.
+As such, the precedence is not always transitive and isn't necessarily propagated to earlier actions, which why these precedences must be enforced for all pairs of `unload_beluga` actions.
+
+For every outgoing flight, and every jig type *or concrete jig* that it must take (processed in order), the procedure is very similar to the one for `unload_beluga` actions, except that it uses `pick_up_rack` and `load_beluga` actions.
+
+NOTE: `unload_beluga` and `load_beluga` actions for the same flight do not need to be ordered !
+
+For every production line and every jig required by it (processed in order), the procedure is very similar to the one for `unload_beluga` and `load_beluga`, except it uses `pick_up_rack` and `deliver_to_hangar` actions. For each jig (and the same production line), the associated `deliver_to_hangar` is constrained to be after all previous ones.
+
+In addition, optional `get_from_hangar` and `put_down_rack` actions are added for each jig that had to be delivered to a production line. There are no constraints to enforce between these `get_from_hangar` actions.
+
+On top of that, for each jig initially placed on a trailer, an optional `put_down_rack` action is made available (for the appropriate side of the rack system, i.e. "beluga" or "production"). Also, for each jig initially located in hangar, optional `get_from_hangar` and `put_down_rack` actions are made available.
+
+Finally, for a given number `N` representing the maximum number of jig swaps allowed, a pair of ordered `pick_up_rack` and `put_down_rack` actions are made available, with their `j` (jig) and `s` (side) parameters constrained to be equal.
+
+There are some additional constraints -- both required and unrequired, but beneficial to prune the search space. However, we do not describe them for the sake of brevity.
 
 ## Explaining
 
