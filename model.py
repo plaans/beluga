@@ -181,7 +181,7 @@ class BelugaModelOptSched:
         assert all(prop_id in self.properties for (prop_id, _) in self.pb_def.props_unload_beluga)
         assert all(prop_id in self.properties for (prop_id, _) in self.pb_def.props_load_beluga)
         assert all(prop_id in self.properties for (prop_id, _) in self.pb_def.props_deliver_to_production_line)
-        """
+
         for (prop_id, rack_name) in self.pb_def.props_rack_always_empty:
             self._reify_prop_rack_always_empty(rack_name, prop_id)
 
@@ -208,7 +208,6 @@ class BelugaModelOptSched:
 
         for (prop_id, (jig_name, pl_name, flight_name)) in self.pb_def.props_jig_to_production_line_before_flight:
             self._reify_prop_jig_to_production_line_before_flight(jig_name, pl_name, flight_name, prop_id)
-        """
 
         for v in self.pb.base_variables:
             if v.name.startswith("hard_prop_"):
@@ -1109,8 +1108,16 @@ class BelugaModelOptSched:
                 if jn == jig2_name and pln == pl2_name:
                     deliver2_a = deliver_a
 
-            assert deliver1_a is not None and deliver2_a is not None
-            self.pb.add_constraint(up.LE(deliver1_a.end, deliver2_a.start), scope=[deliver1_a.present, deliver2_a.present])
+            self.pb.add_constraint(
+                up.Iff(
+                    j1_delivered_to_pl1_before_j2_delivered_to_pl2,
+                    up.And(
+                        deliver1_a.present if deliver1_a is not None else up.FALSE(),
+                        deliver2_a.present if deliver2_a is not None else up.FALSE(),
+                        up.LE(deliver1_a.end, deliver2_a.start) if deliver1_a is not None and deliver2_a is not None else up.FALSE()
+                    ),
+                )
+            )
 
         return j1_delivered_to_pl1_before_j2_delivered_to_pl2
 
@@ -1136,20 +1143,21 @@ class BelugaModelOptSched:
             #all_putdowns += [putdown_a for _, putdown_a in self.all_swap_pickups_n_putdowns.values()]
             all_putdowns = self.all_putdowns
 
-            for putdown1_a in all_putdowns:
-                for putdown2_a in all_putdowns:
-                    self.pb.add_constraint(
-                        up.Implies(
-                            up.And(
-                                up.Equals(putdown1_a.get_parameter("j"), self.rack_objects[jig1_name]),
-                                up.Equals(putdown1_a.get_parameter("r"), self.rack_objects[rack1_name]),
-                                up.Equals(putdown2_a.get_parameter("j"), self.rack_objects[jig2_name]),
-                                up.Equals(putdown2_a.get_parameter("r"), self.rack_objects[rack2_name]),
-                            ),
-                            up.Iff(jig1_putdown_on_rack1_before_jig2_putdown_on_rack2, up.LT(putdown1_a.end, putdown2_a.start))
-                        ),
-                        scope=[putdown1_a.present, putdown2_a.present]
+            self.pb.add_constraint(
+                up.Iff(
+                    jig1_putdown_on_rack1_before_jig2_putdown_on_rack2,
+                    up.Or(
+                        up.And(
+                            up.Equals(putdown1_a.get_parameter("j"), self.rack_objects[jig1_name]),
+                            up.Equals(putdown1_a.get_parameter("r"), self.rack_objects[rack1_name]),
+                            up.Equals(putdown2_a.get_parameter("j"), self.rack_objects[jig2_name]),
+                            up.Equals(putdown2_a.get_parameter("r"), self.rack_objects[rack2_name]),
+                            up.LT(putdown1_a.end, putdown2_a.start),
+                        )
+                        for putdown1_a in all_putdowns for putdown2_a in all_putdowns
                     )
+                )
+            )
 
         return jig1_putdown_on_rack1_before_jig2_putdown_on_rack2
 
@@ -1179,7 +1187,15 @@ class BelugaModelOptSched:
                     proceed_a = _proceed_a
                     break
 
-            assert deliver_a is not None and proceed_a is not None
-            self.pb.add_constraint(up.LE(deliver_a.end, proceed_a.start), scope=[deliver_a.present, proceed_a.present])
+            self.pb.add_constraint(
+                up.Iff(
+                    jig_delivered_to_pl_before_flight,
+                    up.And(
+                        deliver_a.present if deliver_a is not None else up.FALSE(),
+                        proceed_a.present if proceed_a is not None else up.FALSE(),
+                        up.LE(deliver_a.end, proceed_a.start) if deliver_a is not None and proceed_a is not None else up.FALSE()
+                    ),
+                )
+            )
 
         return jig_delivered_to_pl_before_flight
