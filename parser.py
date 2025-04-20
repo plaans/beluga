@@ -177,7 +177,8 @@ def parse_problem_and_properties(problem_base_filename: str, problem_properties_
                 for fl_ in flights:
                     if fl_.name == flight:
                         fl = fl_
-                        fl.incoming = { (k if k < i_unloading else k+1):v for k,v in fl.incoming.items() }
+                        if i_unloading in fl.incoming:
+                            fl.incoming = { (k if k < i_unloading else k+1):v for k,v in fl.incoming.items() }
                         assert i_unloading not in fl.incoming
                         fl.incoming[i_unloading] = jig
                         break
@@ -189,7 +190,8 @@ def parse_problem_and_properties(problem_base_filename: str, problem_properties_
                 for fl_ in flights:
                     if fl_.name == flight:
                         fl = fl_
-                        fl.outgoing = { (k if k < i_loading else k+1):v for k,v in fl.outgoing.items() }
+                        if i_loading in fl.outgoing:
+                            fl.outgoing = { (k if k < i_loading else k+1):v for k,v in fl.outgoing.items() }
                         assert i_loading not in fl.outgoing
                         fl.outgoing[i_loading] = jig
                         break
@@ -201,7 +203,8 @@ def parse_problem_and_properties(problem_base_filename: str, problem_properties_
                 for pl_ in production_lines:
                     if pl_.name in pl_name:
                         pl = pl_
-                        pl.schedule = { (k if k < i else k+1):v for k,v in pl.schedule.items() }
+                        if i in pl.schedule:
+                            pl.schedule = { (k if k < i else k+1):v for k,v in pl.schedule.items() }
                         assert i not in pl.schedule
                         pl.schedule[i] = jig
                         break
