@@ -197,7 +197,7 @@ def check_plan_properties(
                     else:
                         props_satisfied[prop_id] = False
 
-            for (jj, pll, fli) in props_jig_to_production_line_before_flight:
+            for (jj, pll, b) in props_jig_to_production_line_before_flight:
                 if jj == j and pll == pl:
                     prop_id = props_jig_to_production_line_before_flight[(j, pl, b)]
                     props_satisfied[prop_id] = b not in switches_to_next_flight_encountered
