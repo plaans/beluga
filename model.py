@@ -628,7 +628,8 @@ class BelugaModelOptSched:
         return get_jig_from_hangar
 
     def _make_new_proceed_to_next_flight_activity(self) -> Activity:
-        proceed_to_next_flight = self.pb.add_activity("switch_to_next_beluga"+self._new_activity_uid(), optional=True)
+        # proceed_to_next_flight = self.pb.add_activity("switch_to_next_beluga"+self._new_activity_uid(), optional=True)
+        proceed_to_next_flight = self.pb.add_activity("switch_to_next_beluga"+self._new_activity_uid(), optional=False)
         proceed_to_next_flight.add_parameter("b", self.beluga_type)
         proceed_to_next_flight.add_condition(
             up.StartTiming(),
@@ -657,9 +658,9 @@ class BelugaModelOptSched:
         for flight in self.pb_def.flights[1:]:
             proceed_a = self._make_new_proceed_to_next_flight_activity()
             proceed_a.add_constraint(up.Equals(proceed_a.b, self.beluga_objects[flight.name]))
-            self.pb.add_constraint(proceed_a.present)
-            #for (_, earlier_proceed_a) in self.all_proceeds_to_next_flight:
-            #    self.pb.add_constraint(up.LT(earlier_proceed_a.end, proceed_a.start), scope=[earlier_proceed_a.present, proceed_a.present])
+            # self.pb.add_constraint(proceed_a.present)
+            for (_, earlier_proceed_a) in self.all_proceeds_to_next_flight:
+                self.pb.add_constraint(up.LT(earlier_proceed_a.end, proceed_a.start), scope=[earlier_proceed_a.present, proceed_a.present])
             self.all_proceeds_to_next_flight.append((flight.name, proceed_a))
 
     def _add_flights_unloads_w_opt_putdowns(self):
