@@ -665,9 +665,9 @@ class BelugaModelOptSched:
 
     def _add_flights_unloads_w_opt_putdowns(self):
 
+        earlier_unloads = [] # Put outside of loop ? *A priori*, see no difference in the model's "behavior" / conflicts computed ...
         for flight_index in range(self.num_flights):
 
-            earlier_unloads = [] # Put outside of loop ? *A priori*, see no difference in the model's "behavior" / conflicts computed ...
             beluga_name = self.pb_def.flights[flight_index].name
             incoming_jigs = self.pb_def.flights[flight_index].incoming
 
@@ -687,13 +687,19 @@ class BelugaModelOptSched:
 #                self.pb.add_constraint(up.And(putdown_a.present, up.LT(unload_a.end, putdown_a.start)), scope=[unload_a.present])
                 self.pb.add_constraint(up.LT(unload_a.end, putdown_a.start), scope=[unload_a.present, putdown_a.present])
 
-                if flight_index > 0:
-                    (_, prev_proceed) = self.all_proceeds_to_next_flight[flight_index-1]
+                for k in range(1, flight_index):
+                    (_, prev_proceed) = self.all_proceeds_to_next_flight[k-1]
                     self.pb.add_constraint(up.LT(prev_proceed.end, unload_a.start), scope=[unload_a.present, prev_proceed.present])
-
-                if flight_index < self.num_flights-1:
-                    (_, next_proceed) = self.all_proceeds_to_next_flight[flight_index]
+                for k in range(flight_index, self.num_flights-1):
+                    (_, next_proceed) = self.all_proceeds_to_next_flight[k]
                     self.pb.add_constraint(up.LT(unload_a.end, next_proceed.start), scope=[unload_a.present, next_proceed.present])
+
+#                if flight_index > 0:
+#                    (_, prev_proceed) = self.all_proceeds_to_next_flight[flight_index-1]
+#                    self.pb.add_constraint(up.LT(prev_proceed.end, unload_a.start), scope=[unload_a.present, prev_proceed.present])
+#                if flight_index < self.num_flights-1:
+#                    (_, next_proceed) = self.all_proceeds_to_next_flight[flight_index]
+#                    self.pb.add_constraint(up.LT(unload_a.end, next_proceed.start), scope=[unload_a.present, next_proceed.present])
 
                 for earlier_unload_a in earlier_unloads:
                     self.pb.add_constraint(up.LT(earlier_unload_a.end, unload_a.start), scope=[unload_a.present, earlier_unload_a.present])
@@ -706,9 +712,9 @@ class BelugaModelOptSched:
 
     def _add_flights_loads_w_pickups(self):
 
+        earlier_loads = [] # Put outside of loop ? *A priori*, see no difference in the model's "behavior" / conflicts computed ...
         for flight_index in range(self.num_flights):
 
-            earlier_loads = [] # Put outside of loop ? *A priori*, see no difference in the model's "behavior" / conflicts computed ...
             beluga_name = self.pb_def.flights[flight_index].name
             outgoing_jigs = self.pb_def.flights[flight_index].outgoing
 
@@ -737,14 +743,20 @@ class BelugaModelOptSched:
 #                self.pb.add_constraint(up.And(pickup_a.present, up.LT(pickup_a.end, load_a.start)), scope=[load_a.present])
                 self.pb.add_constraint(up.LT(pickup_a.end, load_a.start), scope=[load_a.present, pickup_a.present])
 
-                if flight_index > 0:
-                    (_, prev_proceed) = self.all_proceeds_to_next_flight[flight_index-1]
-#                    self.pb.add_constraint(up.And(prev_proceed.present, up.LT(prev_proceed.end, load_a.start)), scope=[load_a.present])
+                for k in range(1, flight_index):
+                    (_, prev_proceed) = self.all_proceeds_to_next_flight[k-1]
                     self.pb.add_constraint(up.LT(prev_proceed.end, load_a.start), scope=[load_a.present, prev_proceed.present])
-
-                if flight_index < self.num_flights-1:
-                    (_, next_proceed) = self.all_proceeds_to_next_flight[flight_index]
+                for k in range(flight_index, self.num_flights-1):
+                    (_, next_proceed) = self.all_proceeds_to_next_flight[k]
                     self.pb.add_constraint(up.LT(load_a.end, next_proceed.start), scope=[load_a.present, next_proceed.present])
+
+#                if flight_index > 0:
+#                    (_, prev_proceed) = self.all_proceeds_to_next_flight[flight_index-1]
+##                    self.pb.add_constraint(up.And(prev_proceed.present, up.LT(prev_proceed.end, load_a.start)), scope=[load_a.present])
+#                    self.pb.add_constraint(up.LT(prev_proceed.end, load_a.start), scope=[load_a.present, prev_proceed.present])
+#                if flight_index < self.num_flights-1:
+#                    (_, next_proceed) = self.all_proceeds_to_next_flight[flight_index]
+#                    self.pb.add_constraint(up.LT(load_a.end, next_proceed.start), scope=[load_a.present, next_proceed.present])
 
                 for earlier_load_a in earlier_loads:
                     self.pb.add_constraint(up.LT(earlier_load_a.end, load_a.start), scope=[load_a.present, earlier_load_a.present])
@@ -757,9 +769,8 @@ class BelugaModelOptSched:
 
     def _add_pls_deliveries_w_pickups_and_retrievals_w_opt_putdowns(self):
 
+        earlier_delivers = []
         for production_line in self.pb_def.production_lines:
-
-            earlier_delivers = []
 
             for i, jig_name in sorted(production_line.schedule.items()):
 
