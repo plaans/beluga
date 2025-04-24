@@ -246,22 +246,22 @@ An example entry could be the following:
 }
 ```
 
-Below is a list of the properties that are supported. A "v" indicates the given type of property has been sufficiently tested. A "~" indicates that they haven't been tested enough yet. 
+Below is a list of the properties that are supported. A "v" indicates the given type of property has been sufficiently tested. A "?" indicates that they haven't been tested enough yet. 
 
 - [v] `unload_beluga(j, b, i)`: represents jig `j` being the `i`-th one to be unloaded from beluga `b`.
 - [v] `load_beluga(j, b, i)`: represents jig *or jig type* `j` being the `i`-th one to be loaded into beluga `b`.
 - [v] `deliver_to_production_line(j, pl, i)`: represents jig `j` being the `i`-th one to be delivered to production line `pl`.
     - **NOTE**: for `unload_beluga(j, b, i)`, `load_beluga(j, b, i)`, and `deliver_to_production_line(j, pl, i)`, the ordinal `i` indicates a "relative" position in an order. For example, if we to unload only two jigs from the same beluga at "positions" `i_1 = 2` and `i_2 = 4`, they will be treated as the first and second one respectively. As a corollary, if `i = 4` and there is only one jig, everything will be the same as with `i = 0`.
 
-- [~] `rack_always_empty(r)`: represents rack `r` never having a jig on itself (including initially).
-- [~] `at_least_one_rack_always_empty`: represents at least one rack never having a jig on itself (including initially).
-- [~] `jig_always_placed_on_rack_size_leq(j, sz)`: represents jig `j` never being okaced on rack of size strictly larger than `sz`.
-- [~] `num_swaps_used_leq(n)`: represents `n` jig swaps being used at most.
-- [~] `jig_never_on_rack(j, r)`: represents jig `j` never being placed on rack `r`.
-- [~] `jig_only_if_ever_on_rack(j, r)`: represents jig `j` being either never placed on a rack, or only on rack `r`.
-- [~] `jig_to_production_line_order(j1, pl1, j2, pl2)`: represents jig `j1` being delivered to production line `pl1` and `j2` being delivered to production_line `pl2`, in that order.
-- [~] `jig_to_rack_order(j1, r1, j2, r2)`: represents jig `j1` being placed on rack `r1` and `j2` being placed on rack `r2`, in that order.
-- [~] `jig_to_production_line_before_flight(j, pl, b)`: represents jig `j` being delivered to production line `pl`, before the arrival of beluga `b`.
+- [?] `rack_always_empty(r)`: represents rack `r` never having a jig on itself (including initially).
+- [?] `at_least_one_rack_always_empty`: represents at least one rack never having a jig on itself (including initially).
+- [?] `jig_always_placed_on_rack_size_leq(j, sz)`: represents jig `j` never being okaced on rack of size strictly larger than `sz`.
+- [?] `num_swaps_used_leq(n)`: represents `n` jig swaps being used at most.
+- [?] `jig_never_on_rack(j, r)`: represents jig `j` never being placed on rack `r`.
+- [?] `jig_only_if_ever_on_rack(j, r)`: represents jig `j` being either never placed on a rack, or only on rack `r`.
+- [?] `jig_to_production_line_order(j1, pl1, j2, pl2)`: represents jig `j1` being delivered to production line `pl1` and `j2` being delivered to production_line `pl2`, in that order.
+- [?] `jig_to_rack_order(j1, r1, j2, r2)`: represents jig `j1` being placed on rack `r1` and `j2` being placed on rack `r2`, in that order.
+- [?] `jig_to_production_line_before_flight(j, pl, b)`: represents jig `j` being delivered to production line `pl`, before the arrival of beluga `b`.
 
 The file `beluga_property_templates.json` contains the property templates specification to use with the IPEXCO platform. The `name` fields in `definitionTemplate` entries contain property names.
 
