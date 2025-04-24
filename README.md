@@ -21,7 +21,7 @@ source aries-beluga/planning/unified/dev.env
 ```
 
 2. (Optional!) If you have rust installed on your system, you can set the variable `call_cargo_run_rather_than_compiled_bin` in `beluga.py`
-to `True` rather than to `False`. This will build and run a rust binary directly from the `aries-beluga` submodule, instead of using the `beluga_rust` compiled binary available in the root of this repository.
+to `True` rather than to `False`. This will build and run a rust binary directly from the `aries-beluga` submodule, instead of using the `beluga_rust` compiled binary available in the root of this repository. Note that this is only relevant for the explaining task.
 
 TODO: platform-specific versions for compiled `beluga_rust` binary ?
 
