@@ -2,7 +2,7 @@
 
 # Experiments with the Beluga planning domain
 
-This repository is dedicated to experiments on the [**Beluga**](https://github.com/TUPLES-Trustworthy-AI/Beluga-AI-Challenge) planning domain, using the [**Unified Planning (UP)**](https://unified-planning.readthedocs.io/en/latest/) library and [**Aries**](https://github.com/plaans/aries/blob/master/planning/unified/plugin/README.md) planning engine. At the moment of writing, the versions of UP and Aries that are used are in-development versions, not yet part of their main branches.
+This repository is dedicated to experiments on the [**Beluga**](https://github.com/TUPLES-Trustworthy-AI/Beluga-AI-Challenge) planning domain, using the [**Unified Planning (UP)**](https://unified-planning.readthedocs.io/en/latest/) library and [**Aries**](https://github.com/plaans/aries/blob/master/planning/unified/plugin/README.md) planning engine. At the moment of writing, the versions of UP and Aries that are used are **in-development versions**, not yet part of their main branches.
 
 Three types of high-level tasks were investigated in this repository:
 
@@ -14,57 +14,254 @@ Three types of high-level tasks were investigated in this repository:
 
 ## Setup / Usage
 
-TODO
+TODO (about development versions of Unified Planning & Aries)
 
 - **Planning**:
     ```
-    TODO
+    ./beluga.py solve path_to_problem_base_spec.json path_to_problem_properties_spec.json
     ```
 
 - **Explaining**:
     ```
-    TODO
+    ./beluga.py explain path_to_problem_base_spec.json path_to_problem_properties_spec.json path_to_plan_to_analyse.json
     ```
 
 - **Property checking**:
     ```
-    TODO
+    ./beluga.py check-props path_to_problem_base_spec.json path_to_problem_properties_spec.json path_to_plan_to_analyse.json
     ```
 
 ## The Beluga Domain
 
-TODO
+In the Beluga domain, there are Beluga aircrafts flying to and from an aircraft assembly site.
+An incoming Beluga contains specific jigs loaded with aircraft parts. These jigs must be unloaded from the Beluga, in order. And on departure, an outgoing Beluga must take back empty jigs of specific types.
+At the same time, (non-empty) jigs must be delivered to certain production lines, in a given order.
+This is achieved via a rack system connecting the "Beluga side" and "factory side" of the assembly site.Additionally, some specialised trailers can be used on each these sides to transport the jigs to/from the Belugas and hangars (where the parts are sent to production lines).
+
+It is recommended to specify a problem using 2 JSON files (the "base" and the "properties"). However, a problem could also be specified using only the "base" JSON file (see below).
 
 ### Base Problem Specification
 
-TODO
+The "base" file specifies the settings / initial state of the problem. Below is a simple example.
+
+```
+{
+    "trailers_beluga": [
+        {
+            "name": "beluga_trailer_1",
+            "jig": ""
+        }
+    ],
+    "trailers_factory": [
+        {
+            "name": "factory_trailer_1",
+            "jig": ""
+        },
+        {
+            "name": "factory_trailer_2",
+            "jig": ""
+        }
+    ],
+    "hangars": [
+        {
+            "name": "hangar1",
+            "jig": ""
+        },
+        {
+            "name": "hangar2",
+            "jig": ""
+        }
+    ],
+    "jig_types": {
+        "typeE": {
+            "name": "typeE",
+            "size_empty": 32,
+            "size_loaded": 32
+        },
+        "typeD": {
+            "name": "typeD",
+            "size_empty": 18,
+            "size_loaded": 25
+        },
+        "typeC": {
+            "name": "typeC",
+            "size_empty": 9,
+            "size_loaded": 18
+        },
+        "typeB": {
+            "name": "typeB",
+            "size_empty": 8,
+            "size_loaded": 11
+        },
+        "typeA": {
+            "name": "typeA",
+            "size_empty": 4,
+            "size_loaded": 4
+        }
+    },
+    "racks": [
+        {
+            "name": "rack00",
+            "size": 39,
+            "jigs": [
+                "jig0001"
+            ]
+        },
+        {
+            "name": "rack01",
+            "size": 32,
+            "jigs": []
+        }
+    ],
+    "jigs": {
+        "jig0001": {
+            "name": "jig0001",
+            "type": "typeD",
+            "empty": true
+        },
+        "jig0002": {
+            "name": "jig0002",
+            "type": "typeE",
+            "empty": false
+        },
+        "jig0003": {
+            "name": "jig0003",
+            "type": "typeE",
+            "empty": false
+        },
+        "jig0004": {
+            "name": "jig0004",
+            "type": "typeD",
+            "empty": false
+        }
+    },
+    "production_lines": [
+        {
+            "name": "pl0",
+            "schedule": []
+        }
+    ],
+    "flights": [
+        {
+            "name": "beluga1",
+            "incoming": [],
+            "outgoing": []
+        },
+        {
+            "name": "beluga2",
+            "incoming": [],
+            "outgoing": []
+        },
+        {
+            "name": "beluga3",
+            "incoming": [],
+            "outgoing": []
+        },
+        {
+            "name": "beluga4",
+            "incoming": [],
+            "outgoing": []
+        }
+    ]
+}
+```
+
+The `incoming` and `outgoing` fields of `flights` objects, as well as `schedule` fields of `production_lines` are recommended to be left empty (as in the example above). Indeed, the recommended way to specify them is through the "properties" JSON file (see below). However, one can still fill
+these fields in the "base" files, e.g.:
+
+```
+{
+    "name": "beluga2",
+    "incoming": ["jig0002", "jig0003"],
+    "outgoing": ["typeD"]
+},
+```
+
+Please note though that the unloadings / loadings / production line deliveries specified in this way are **not** going to be considered among the "properties".
 
 #### Legacy format
 
-TODO
+In the example above, trailers and hangars are specified like this:
+
+```
+"trailers_beluga": [
+    {
+        "name": "beluga_trailer_1",
+        "jig": ""
+    }
+],
+"hangars": [
+    {
+        "name": "hangar1",
+        "jig": ""
+    },
+],
+```
+
+The `jig` field there is used to specify if a `jig` is present on trailer / in a hangar in the initial state of the problem. In the case there are no such jig, the following "legacy format" can be used:
+
+```
+"trailers_beluga": [
+    {
+        "name": "beluga_trailer_1",
+    }
+],
+"hangars": [
+    "hangar1"
+],
+```
 
 ### Properties Specification
 
 Properties are specified in a JSON file containing a single list
-whose entries represent properties and follow the `{ "name": "xxx", "params": {...} }` format.
-An example entry could be the following: `{ "name": "unload_beluga", "params": { "j": "jig0001", "b": "beluga1", "i": 0 } }`.
+whose entries represent properties (which can be seen as soft goals) and abide to the following format:
 
-List of considered / supported properties:
+```
+{
+    "_id": "prop_id",
+    "definition": {
+        "name": "prop_name",
+        "params": {
+            ...
+        }
+    }
+}
+```
 
-- `unload_beluga(j, b, i)`: represents jig `j` being the `i`-th one to be unloaded from beluga `b`.
-- `load_beluga(j, b, i)`: represents jig *or jig type* `j` being the `i`-th one to be loaded into beluga `b`.
-- `deliver_to_production_line(j, pl, i)`: represents jig `j` being the `i`-th one to be delivered to production line `pl`.
+An example entry could be the following: 
+
+```
+{
+    "_id": "prop_id00",
+    "definition": {
+        "name": "unload_beluga",
+        "params": {
+            "j": "jig0001",
+            "b": "beluga1",
+            "i": 0
+        }
+    }
+}
+```
+
+Below is a list of the properties that are supported. A "v" indicates the given type of property has been sufficiently tested. A "~" indicates that they haven't been tested enough yet. 
+
+- [v] `unload_beluga(j, b, i)`: represents jig `j` being the `i`-th one to be unloaded from beluga `b`.
+- [v] `load_beluga(j, b, i)`: represents jig *or jig type* `j` being the `i`-th one to be loaded into beluga `b`.
+- [v] `deliver_to_production_line(j, pl, i)`: represents jig `j` being the `i`-th one to be delivered to production line `pl`.
     - **NOTE**: for `unload_beluga(j, b, i)`, `load_beluga(j, b, i)`, and `deliver_to_production_line(j, pl, i)`, the ordinal `i` indicates a "relative" position in an order. For example, if we to unload only two jigs from the same beluga at "positions" `i_1 = 2` and `i_2 = 4`, they will be treated as the first and second one respectively. As a corollary, if `i = 4` and there is only one jig, everything will be the same as with `i = 0`.
 
-- `rack_always_empty(r)`: represents rack `r` never having a jig on itself (including initially).
-- `at_least_one_rack_always_empty`: represents at least one rack never having a jig on itself (including initially).
-- `jig_always_placed_on_rack_size_leq(j, sz)`: represents jig `j` never being okaced on rack of size strictly larger than `sz`.
-- `num_swaps_used_leq(n)`: represents `n` jig swaps being used at most.
-- `jig_never_on_rack(j, r)`: represents jig `j` never being placed on rack `r`.
-- `jig_only_if_ever_on_rack(j, r)`: represents jig `j` being either never placed on a rack, or only on rack `r`.
-- `jig_to_production_line_order(j1, pl1, j2, pl2)`: represents jig `j1` being delivered to production line `pl1` and `j2` being delivered to production_line `pl2`, in that order.
-- `jig_to_rack_order(j1, r1, j2, r2)`: represents jig `j1` being placed on rack `r1` and `j2` being placed on rack `r2`, in that order.
-- `jig_to_production_line_before_flight(j, pl, b)`: represents jig `j` being delivered to production line `pl`, before the arrival of beluga `b`.
+- [~] `rack_always_empty(r)`: represents rack `r` never having a jig on itself (including initially).
+- [~] `at_least_one_rack_always_empty`: represents at least one rack never having a jig on itself (including initially).
+- [~] `jig_always_placed_on_rack_size_leq(j, sz)`: represents jig `j` never being okaced on rack of size strictly larger than `sz`.
+- [~] `num_swaps_used_leq(n)`: represents `n` jig swaps being used at most.
+- [~] `jig_never_on_rack(j, r)`: represents jig `j` never being placed on rack `r`.
+- [~] `jig_only_if_ever_on_rack(j, r)`: represents jig `j` being either never placed on a rack, or only on rack `r`.
+- [~] `jig_to_production_line_order(j1, pl1, j2, pl2)`: represents jig `j1` being delivered to production line `pl1` and `j2` being delivered to production_line `pl2`, in that order.
+- [~] `jig_to_rack_order(j1, r1, j2, r2)`: represents jig `j1` being placed on rack `r1` and `j2` being placed on rack `r2`, in that order.
+- [~] `jig_to_production_line_before_flight(j, pl, b)`: represents jig `j` being delivered to production line `pl`, before the arrival of beluga `b`.
+
+The file `beluga_property_templates.json` contains the property templates specification to use with the IPEXCO platform. The `name` fields in `definitionTemplate` entries contain property names.
 
 ## Property Checking
 
@@ -89,6 +286,8 @@ This limitation is briefly discussed sections 4.2 and 4.3 in [[2]]().
 As such, we may be unable to prove the unsatisfiability of a problem instance in the most general case, when no assumptions are made on the maximal number of possible swaps.
 This has a direct impact on the matter of explainability, as will be touched upon further below.
 
+The number of allowed swaps can be controlled using the environment variable `MAX_NUM_AVAILABLE_SWAPS`.
+
 ### Optional Scheduling Model
 
 For every flight excluding the very first one, create a **non-optional** `switch_to_next_beluga` action.
@@ -97,7 +296,7 @@ Constrain all these `switch_to_next_beluga` actions to be one after the other.
 For every incoming flight, and every concrete jig carried in it (processed in order):
 - Add an optional `unload_beluga` *action* as well as an optional `put_down_rack` action (on the beluga side of the rack system), and constrain them to be ordered.
 - Constrain the `unload_beluga` action to be between the previous (if it exists) and the next (if it exists) `switch_to_next_beluga` actions.
-- Constrain the `unload_beluga` action to be after *all* previous `unload_beluga` actions.
+- Constrain the `unload_beluga` action to be after *every* previous `unload_beluga` actions.
 
 NOTE: Since `unload_beluga` actions are optional, precedence constraints between two of them only hold when both are present.
 As such, the precedence is not always transitive and isn't necessarily propagated to earlier actions, which why these precedences must be enforced for all pairs of `unload_beluga` actions.
