@@ -1,0 +1,295 @@
+[
+	{
+		"class": "Main Goals",
+		"color": "#ed736b",
+		"icon": "factory",
+		"type": "G",
+		"variables": {
+			"$J": [
+				"jig"
+			],
+			"$PL": [
+				"production_line"
+			],
+			"$I": [
+				"number"
+			]
+		},
+		"nameTemplate": "Jig $J is the $I -th jig to be delivered to production line $PL",
+		"definitionTemplate": {
+			"name": "deliver_to_production_line",
+			"parameters": [
+				"$J",
+				"$PL",
+				"$I"
+			]
+		},
+		"sentenceTemplate": "Jig $J is the $I -th jig to be delivered to production line $PL"
+	},
+	{
+		"class": "Main Goals",
+		"color": "#ed736b",
+		"icon": "flight_land",
+		"type": "G",
+		"variables": {
+			"$J": [
+				"jig",
+				"jig_type"
+			],
+			"$B": [
+				"flight"
+			],
+			"$I": [
+				"number"
+			]
+		},
+		"nameTemplate": "Jig $J is the $I -th jig loaded into beluga $B",
+		"definitionTemplate": {
+			"name": "load_beluga",
+			"parameters": [
+				"$J",
+				"$B",
+				"$I"
+			]
+		},
+		"sentenceTemplate": "Jig $J is the $I -th jig loaded into beluga $B"
+	},
+	{
+		"class": "Main Goals",
+		"color": "#ed736b",
+		"icon": "flight_takeoff",
+		"type": "G",
+		"variables": {
+			"$J": [
+				"jig"
+			],
+			"$B": [
+				"flight"
+			],
+			"$I": [
+				"number"
+			]
+		},
+		"nameTemplate": "Jig $J is the $I -th jig unloaded from beluga $B",
+		"definitionTemplate": {
+			"name": "unload_beluga",
+			"parameters": [
+				"$J",
+				"$B",
+				"$I"
+			]
+		},
+		"sentenceTemplate": "Jig $J is the $I -th jig unloaded from beluga $B"
+	},
+	{
+		"class": "Bonus Properties",
+		"color": "#ed736b",
+		"icon": "block",
+		"type": "G",
+		"variables": {
+			"$R": [
+				"rack"
+			]
+		},
+		"nameTemplate": "Rack $R always empty",
+		"definitionTemplate": {
+			"name": "rack_always_empty",
+			"parameters": [
+				"$R"
+			]
+		},
+		"sentenceTemplate": "Rack $R is always empty"
+	},
+	{
+		"class": "Bonus Properties",
+		"color": "#ed736b",
+		"icon": "radio_button_unchecked",
+		"type": "G",
+		"variables": {
+			"": []
+		},
+		"nameTemplate": "At least one rack always empty",
+		"definitionTemplate": {
+			"name": "at_least_one_rack_always_empty",
+			"parameters": []
+		},
+		"sentenceTemplate": "At least one rack is always empty"
+	},
+	{
+		"class": "Bonus Properties",
+		"color": "#ed736b",
+		"icon": "full_screen_exit",
+		"type": "G",
+		"variables": {
+			"$J": [
+				"jig"
+			],
+			"$RS": [
+				"number"
+			]
+		},
+		"nameTemplate": "Jig $J placed on rack shorter than $RS (if ever)",
+		"definitionTemplate": {
+			"name": "jig_always_placed_on_rack_size_leq",
+			"parameters": [
+				"$J",
+				"$RS"
+			]
+		},
+		"sentenceTemplate": "Jig $J is always placed on a rack shorter than $RS (if ever)"
+	},
+	{
+		"class": "Bonus Properties",
+		"color": "#ed736b",
+		"icon": "sync_arrow_down",
+		"type": "G",
+		"variables": {
+			"$N": [
+				"number"
+			]
+		},
+		"nameTemplate": "Less than $N swaps used",
+		"definitionTemplate": {
+			"name": "num_swaps_used_leq",
+			"parameters": [
+				"$N"
+			]
+		},
+		"sentenceTemplate": "Less than $N swaps used"
+	},
+	{
+		"class": "Bonus Properties",
+		"color": "#ed736b",
+		"icon": "block",
+		"type": "G",
+		"variables": {
+			"$J": [
+				"jig"
+			],
+			"$R": [
+				"rack"
+			]
+		},
+		"nameTemplate": "Jig $J never on rack $R",
+		"definitionTemplate": {
+			"name": "jig_never_on_rack",
+			"parameters": [
+				"$J",
+				"$R"
+			]
+		},
+		"sentenceTemplate": "Jig $J never on rack $R"
+	},
+	{
+		"class": "Bonus Properties",
+		"color": "#ed736b",
+		"icon": "block",
+		"type": "G",
+		"variables": {
+			"$J": [
+				"jig"
+			],
+			"$R": [
+				"rack"
+			]
+		},
+		"nameTemplate": "Jig $J only if ever on rack $R",
+		"definitionTemplate": {
+			"name": "jig_only_if_ever_on_rack",
+			"parameters": [
+				"$J",
+				"$R"
+			]
+		},
+		"sentenceTemplate": "Jig $J only if ever on rack $R"
+	},
+	{
+		"class": "Bonus Properties",
+		"color": "#ed736b",
+		"icon": "schedule",
+		"type": "G",
+		"variables": {
+			"$J1": [
+				"jig"
+			],
+			"$PL1": [
+				"production_line"
+			],
+			"$J2": [
+				"jig"
+			],
+			"$PL2": [
+				"production_line"
+			]
+		},
+		"nameTemplate": "Jig $J1 is delivered to production line $PL1 before $J2 is delivered to prodution line $PL2",
+		"definitionTemplate": {
+			"name": "jig_to_production_line_order",
+			"parameters": [
+				"$J1",
+				"$PL1",
+				"$J2",
+				"$PL2"
+			]
+		},
+		"sentenceTemplate": "Jig $J1 is delivered to production line $PL1 before $J2 is delivered to prodution line $PL2"
+	},
+	{
+		"class": "Bonus Properties",
+		"color": "#ed736b",
+		"icon": "schedule",
+		"type": "G",
+		"variables": {
+			"$J1": [
+				"jig"
+			],
+			"$R1": [
+				"rack"
+			],
+			"$J2": [
+				"jig"
+			],
+			"$R2": [
+				"rack"
+			]
+		},
+		"nameTemplate": "Jig $J1 is placed on rack $R1 before $J2 is placed on rack $R2",
+		"definitionTemplate": {
+			"name": "jig_to_rack_order",
+			"parameters": [
+				"$J1",
+				"$R1",
+				"$J2",
+				"$R2"
+			]
+		},
+		"sentenceTemplate": "Jig $J1 is placed on rack $R1 before $J2 is placed on rack $R2"
+	},
+	{
+		"class": "Bonus Properties",
+		"color": "#ed736b",
+		"icon": "schedule",
+		"type": "G",
+		"variables": {
+			"$J": [
+				"jig"
+			],
+			"$PL": [
+				"production_line"
+			],
+			"$B": [
+				"flight"
+			]
+		},
+		"nameTemplate": "Jig $J is placed on production line $PL before beluga $B arrives",
+		"definitionTemplate": {
+			"name": "jig_to_production_line_before_flight",
+			"parameters": [
+				"$J",
+				"$PL",
+				"$B"
+			]
+		},
+		"sentenceTemplate": "Jig $J is placed on production line $PL before beluga $B arrives"
+	}
+]
