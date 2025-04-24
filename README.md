@@ -34,7 +34,7 @@ Then, you can use the following commands to perform one the aforementioned three
 
 - **Explaining**:
     ```
-    ./beluga.py explain path_to_problem_base_spec.json path_to_problem_properties_spec.json path_to_plan_to_analyse.json
+    ./beluga.py explain path_to_problem_base_spec.json path_to_problem_properties_spec.json
     ```
 
 - **Property checking**:
