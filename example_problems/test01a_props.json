@@ -1,0 +1,84 @@
+[
+    {
+        "_id": "id00",
+        "definition": {
+            "name": "deliver_to_production_line",
+            "parameters": ["jig0002", "pl0", 0]
+        }
+    },
+    {
+        "_id": "id01",
+        "definition": {
+            "name": "deliver_to_production_line",
+            "parameters": ["jig0003", "pl1", 0]
+        }
+    },
+    {
+        "_id": "id02",
+        "definition": {
+            "name": "deliver_to_production_line",
+            "parameters": ["jig0005", "pl1", 1]
+        }
+    },
+    {
+        "_id": "id03",
+        "definition": {
+            "name": "deliver_to_production_line",
+            "parameters": ["jig0004", "pl2", 0]
+        }
+    },
+
+    {
+        "_id": "id04",
+        "definition": {
+            "name": "unload_beluga",
+            "parameters": ["jig0003", "beluga1", 0]
+        }
+    },
+    {
+        "_id": "id05",
+        "definition": {
+            "name": "unload_beluga",
+            "parameters": ["jig0004", "beluga1", 1]
+        }
+    },
+
+    {
+        "_id": "id06",
+        "definition": {
+            "name": "load_beluga",
+            "parameters": ["typeD", "beluga1", 0]
+        }
+    },
+
+    {
+        "_id": "id07",
+        "definition": {
+            "name": "unload_beluga",
+            "parameters": ["jig0005", "beluga2", 0]
+        }
+    },
+
+    {
+        "_id": "id08",
+        "definition": {
+            "name": "load_beluga",
+            "parameters": ["typeB", "beluga3", 0]
+        }
+    },
+    {
+        "_id": "id09",
+        "definition": {
+            "name": "load_beluga",
+            "parameters": ["typeB", "beluga3", 1]
+        }
+    },
+    {
+        "_id": "id10",
+        "definition": {
+            "name": "load_beluga",
+            "parameters": ["typeB", "beluga3", 2]
+        }
+    }
+
+]
