@@ -117,32 +117,38 @@ if __name__ == "__main__":
         serialize_problem(test_beluga_model.pb, output_upp_path)        
 
         import subprocess
-#        popen = subprocess.Popen(
-#            (
-#                os.path.join(dir_name, "beluga_rust"),
-#                "explain",
-#                output_upp_path,
-#                output_confls_path,
-#            ),
-#            stdout=subprocess.PIPE,
-#        )
-        popen = subprocess.Popen(
-            (
-                "cargo",
-                "run",
-                "--bin",
-                "beluga",
-                "--release",
-                "explain",
-                output_upp_path,
-                output_confls_path,
-            ),
-            stdout=subprocess.PIPE,
-            cwd=os.path.join(os.path.abspath(os.path.dirname(__file__)), "aries-beluga"),
-        )
+
+        call_cargo_run_rather_than_compiled_bin = False
+        if call_cargo_run_rather_than_compiled_bin:
+            popen = subprocess.Popen(
+                (
+                    "cargo",
+                    "run",
+                    "--bin",
+                    "beluga",
+                    "--release",
+                    "explain",
+                    output_upp_path,
+                    output_confls_path,
+                ),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=os.path.join(os.path.abspath(os.path.dirname(__file__)), "aries-beluga"),
+            )
+        else:
+            popen = subprocess.Popen(
+                (
+                    os.path.abspath(os.path.dirname(__file__))+"/beluga_rust",
+                    "explain",
+                    output_upp_path,
+                    output_confls_path,
+                ),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=os.path.abspath(os.path.dirname(__file__)),
+            )
+
         popen.wait()
-        # output = popen.stdout.read() # type: ignore
-        # print(output)
 
         with open(output_confls_path, 'r') as f:
             conflicts_data = json.load(f)
