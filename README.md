@@ -16,6 +16,8 @@ Three types of high-level tasks were investigated in this repository:
 
 TODO (about development versions of Unified Planning & Aries)
 
+TODO (about rust / cargo: python launching the rust executable via cargo in the submodule VS compiled executable `beluga_rust`)
+
 - **Planning**:
     ```
     ./beluga.py solve path_to_problem_base_spec.json path_to_problem_properties_spec.json
