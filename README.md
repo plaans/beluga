@@ -14,9 +14,18 @@ Three types of high-level tasks were investigated in this repository:
 
 ## Setup / Usage
 
-TODO (about development versions of Unified Planning & Aries)
+1. Let the (correct development version of the) Unified Planning package be used by your current Python environment, using this command:
 
-TODO (about rust / cargo: python launching the rust executable via cargo in the submodule VS compiled executable `beluga_rust`)
+```
+source aries-beluga/planning/unified/dev.env
+```
+
+2. (Optional!) If you have rust installed on your system, you can set the variable `call_cargo_run_rather_than_compiled_bin` in `beluga.py`
+to `True` rather than to `False`. This will build and run a rust binary directly from the `aries-beluga` submodule, instead of using the `beluga_rust` compiled binary available in the root of this repository.
+
+TODO: platform-specific versions for compiled `beluga_rust` binary ?
+
+Then, you can use the following commands to perform one the aforementioned three tasks:
 
 - **Planning**:
     ```
