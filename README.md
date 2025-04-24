@@ -223,9 +223,7 @@ whose entries represent properties (which can be seen as soft goals) and abide t
     "_id": "prop_id",
     "definition": {
         "name": "prop_name",
-        "params": {
-            ...
-        }
+        "parameters": [...],
     }
 }
 ```
@@ -237,11 +235,7 @@ An example entry could be the following:
     "_id": "prop_id00",
     "definition": {
         "name": "unload_beluga",
-        "params": {
-            "j": "jig0001",
-            "b": "beluga1",
-            "i": 0
-        }
+        "parameters": ["jig0001", "beluga1", 0]
     }
 }
 ```
