@@ -783,8 +783,9 @@ class BelugaModelOptSched:
                 deliver_a.add_constraint(up.Equals(deliver_a.j, self.jig_objects[jig_name]))
                 deliver_a.add_constraint(up.Equals(deliver_a.pl, self.production_line_objects[production_line.name]))
 
-#                self.pb.add_constraint(up.Iff(deliver_a.present, pickup_a.present))
-                self.pb.add_constraint(up.Implies(deliver_a.present, pickup_a.present))
+                # self.pb.add_constraint(up.Implies(deliver_a.present, pickup_a.present))
+                # ^^ REMOVED ! Because the jig could already be initially on a trailer on the factory side !
+                #              In which case it would be incorrect to enforce a pick-up before delivering (since it's already picked up)
 
 #                self.pb.add_constraint(up.And(pickup_a.present, up.LT(pickup_a.end, deliver_a.start)), scope=[deliver_a.present])
                 self.pb.add_constraint(up.LT(pickup_a.end, deliver_a.start), scope=[deliver_a.present, pickup_a.present])
