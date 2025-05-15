@@ -71,9 +71,21 @@ if __name__ == "__main__":
         test_beluga_model = BelugaModelOptSched(test_pb_def, base_filename+"_"+props_filename, num_available_swaps, None)
         serialize_problem(test_beluga_model.pb, output_upp_path)
 
+        num_at_most_considered_swaps = min(
+            [num_available_swaps]
+            + [m for (_, m) in test_pb_def.props_num_swaps_used_leq]
+        )
+
         n = 0
         while True:
-            print('swaps "spawned": {} swaps allowed: {}'.format(num_available_swaps, n))
+            print('total swaps available: {},' \
+                  'max swaps to consider: {},' \
+                  'swaps allowed on this run: {} '.format(
+                      num_available_swaps,
+                      num_at_most_considered_swaps,
+                      n,
+                  )
+            )
         
             (test_plan, test_plan_as_json) = test_beluga_model.solve_with_properties(
                 list(test_beluga_model.properties.keys()),
@@ -83,8 +95,8 @@ if __name__ == "__main__":
             if test_plan is not None:
                 break
             n += 1
-            if n > num_available_swaps:   # FIXME TODO temporary ?
-                sys.exit(2)                # FIXME TODO temporary ?
+            if n > num_at_most_considered_swaps:
+                sys.exit(2)
 
         assert (test_plan is None and test_plan_as_json is None) or (test_plan is not None and test_plan_as_json is not None)
         print(test_plan_as_json)
