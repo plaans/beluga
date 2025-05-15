@@ -160,6 +160,13 @@ if __name__ == "__main__":
                 cwd=os.path.abspath(os.path.dirname(__file__)),
             )
 
+        while True:
+            out = popen.stdout.readline().rstrip() # type: ignore
+            if popen.poll() is not None:
+                break
+            if out:
+                print(out.decode('utf-8'))
+        # popen.poll()
         popen.wait()
 
         with open(output_confls_path, 'r') as f:
