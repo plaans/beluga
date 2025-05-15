@@ -222,7 +222,7 @@ def parse_problem_and_properties(problem_base_filename: str, problem_properties_
                 props_jig_always_placed_on_rack_size_leq.append((prop_id, (jig_name, num)))
 
             elif name == "num_swaps_used_leq":
-                num = params[0]
+                num = int(params[0])
                 props_num_swaps_used_leq.append((prop_id, num))
 
             elif name == "jig_never_on_rack":
