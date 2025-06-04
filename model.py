@@ -769,9 +769,9 @@ class BelugaModelOptSched:
 
     def _add_pls_deliveries_w_pickups_and_retrievals_w_opt_putdowns(self):
 
-        earlier_delivers = []
         for production_line in self.pb_def.production_lines:
 
+            earlier_delivers = []
             for i, jig_name in sorted(production_line.schedule.items()):
 
                 # pickup + deliver
