@@ -183,31 +183,31 @@ class BelugaModelOptSched:
         assert all(prop_id in self.properties for (prop_id, _) in self.pb_def.props_deliver_to_production_line)
 
         for (prop_id, rack_name) in self.pb_def.props_rack_always_empty:
-            self._reify_prop_rack_always_empty(rack_name, prop_id)
-
+            self.properties[prop_id] = self._reify_prop_rack_always_empty(rack_name, prop_id)
+            
         if self.pb_def.prop_at_least_one_rack_always_empty is not None:
-            self._reify_prop_at_least_one_rack_always_empty(self.pb_def.prop_at_least_one_rack_always_empty)
+            self.properties[self.pb_def.prop_at_least_one_rack_always_empty] = self._reify_prop_at_least_one_rack_always_empty(self.pb_def.prop_at_least_one_rack_always_empty)
 
         for (prop_id, (jig_name, rs)) in self.pb_def.props_jig_always_placed_on_rack_size_leq:
-            self._reify_prop_jig_always_placed_on_rack_shorter_or_same_size_as(jig_name, rs, prop_id)
+            self.properties[prop_id] = self._reify_prop_jig_always_placed_on_rack_shorter_or_same_size_as(jig_name, rs, prop_id)
 
         for (prop_id, ns) in self.pb_def.props_num_swaps_used_leq:
-            self._reify_prop_num_swaps_used_leq_val(ns, prop_id)
+            self.properties[prop_id] = self._reify_prop_num_swaps_used_leq_val(ns, prop_id)
 
         for (prop_id, (jig_name, rack_name)) in self.pb_def.props_jig_never_on_rack:
-            self._reify_prop_jig_never_on_rack(jig_name, rack_name, prop_id)
+            self.properties[prop_id] = self._reify_prop_jig_never_on_rack(jig_name, rack_name, prop_id)
 
         for (prop_id, (jig_name, rack_name)) in self.pb_def.props_jig_only_if_ever_on_rack:
-            self._reify_prop_jig_only_if_ever_on_rack(jig_name, rack_name, prop_id)
+            self.properties[prop_id] = self._reify_prop_jig_only_if_ever_on_rack(jig_name, rack_name, prop_id)
 
         for (prop_id, (jig1_name, pl1_name, jig2_name, pl2_name)) in self.pb_def.props_jig_to_production_line_order:
-            self._reify_prop_jig_to_production_line_order(jig1_name, pl1_name, jig2_name, pl2_name, prop_id)
+            self.properties[prop_id] = self._reify_prop_jig_to_production_line_order(jig1_name, pl1_name, jig2_name, pl2_name, prop_id)
 
         for (prop_id, (jig1_name, rack1_name, jig2_name, rack2_name)) in self.pb_def.props_jig_to_rack_order:
-            self._reify_prop_jig_to_rack_order(jig1_name, rack1_name, jig2_name, rack2_name, prop_id)
+            self.properties[prop_id] = self._reify_prop_jig_to_rack_order(jig1_name, rack1_name, jig2_name, rack2_name, prop_id)
 
         for (prop_id, (jig_name, pl_name, flight_name)) in self.pb_def.props_jig_to_production_line_before_flight:
-            self._reify_prop_jig_to_production_line_before_flight(jig_name, pl_name, flight_name, prop_id)
+            self.properties[prop_id] = self._reify_prop_jig_to_production_line_before_flight(jig_name, pl_name, flight_name, prop_id)
 
         for v in self.pb.base_variables:
             if v.name.startswith("hard_prop_"):
@@ -226,6 +226,7 @@ class BelugaModelOptSched:
             pb.add_constraint(up.Equals(self.num_used_swaps, num_swaps_to_use)) # or also GE ? LE ? -> All have different pros/cons (depending on the situation, too...!..?)
 
         for prop_id in prop_ids:
+            # print("prop: ",self.properties[prop_id])
             pb.add_constraint(self.properties[prop_id])
 
 ##        prop_ids_yes = ["id00","id01","id02","id03","id04","id05","id06","id07","id08","id09","id10"]
