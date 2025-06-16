@@ -1,0 +1,8 @@
+Dockerfile
+Makefile
+README.md
+beluga_property_templates.json
+aries-beluga-apptainer.sif
+__pycache__/
+output/
+example_problems
