@@ -42,6 +42,10 @@ Then, you can use the following commands to perform one the aforementioned three
     ./beluga.py check-props path_to_problem_base_spec.json path_to_problem_properties_spec.json path_to_plan_to_analyse.json
     ```
 
+### Apptainer
+
+It is possible to build an Apptainer (`.sif` file) from the `Dockerfile`, using the `compile_all` target provided in the `Makefile`. The `Makefile` also provides shortcut commands (and one-liner usage examples) to run solving or explaining in the apptainer.
+
 ## The Beluga Domain
 
 In the Beluga domain, there are Beluga aircrafts flying to and from an aircraft assembly site.
