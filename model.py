@@ -333,7 +333,8 @@ class BelugaModelOptSched:
         # # #
 
         self.part_location_type = up.UserType("PartLoc")
-
+        self.at = self.pb.add_fluent("at", self.part_location_type, p=self.jig_type)
+        
         # # #
 
         self.rack_type = up.UserType("Rack", father=self.part_location_type)
@@ -376,8 +377,6 @@ class BelugaModelOptSched:
             self.production_line_objects[production_line.name] = production_line_obj
 
         # # #
-
-        self.at = self.pb.add_fluent("at", self.part_location_type, p=self.jig_type)
 
         self.trailer_type = up.UserType("Trailer", self.part_location_type)
         self.trailer_available = up.Fluent("available", up.BoolType(), t=self.trailer_type)
