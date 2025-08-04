@@ -23,49 +23,6 @@ if __name__ == "__main__":
         props_filename = sys.argv[3]
         test_pb_def = parse_problem_and_properties(base_filename, props_filename)
         print(test_pb_def)
-        # full_problem_filename = sys.argv[2]
-        # test_pb_def = parse_problem_full(full_problem_filename)
-        # print(test_pb_def)
-
-        # # # with fixed num of allowed_swaps # # # 
-        """
-        num_available_swaps = 0
-        test_beluga_model = BelugaModelOptSched(test_pb_def, base_filename+"_"+props_filename, num_available_swaps, None)
-        
-        serialize_problem(test_beluga_model.pb, output_upp_path)
-        (test_plan, test_plan_as_json) = test_beluga_model.solve_with_properties(list(test_beluga_model.properties.keys()))
-        """
-        # import subprocess
-        # popen = subprocess.Popen(
-        #     (
-        #         os.path.join(os.path.abspath(sys.path[0]), "beluga_rust"),
-        #         "solve",
-        #         output_upp_path,
-        #     ),
-        #     stdout=subprocess.PIPE,
-        # )
-        # popen.wait()
-        # output = popen.stdout.read() # type: ignore
-        # print(output)
-        
-        # # # with growing num of allowed_swaps (until limit or sol found) # # # 
-    
-        """ max_num_available_swaps = int(os.environ.get('MAX_NUM_AVAILABLE_SWAPS', 10))
-        num_available_swaps = 0
-        while True:
-            print('available swaps "spawned": {}'.format(num_available_swaps))
-        
-            test_beluga_model = BelugaModelOptSched(test_pb_def, base_filename+"_"+props_filename, num_available_swaps, None)
-
-            (test_plan, test_plan_as_json) = test_beluga_model.solve_with_properties(list(test_beluga_model.properties.keys()))
-        
-            if test_plan is not None:
-                break
-            num_available_swaps += 1
-            if num_available_swaps >= max_num_available_swaps:   # FIXME TODO temporary ?
-                sys.exit(2)                                      # FIXME TODO temporary ?
-         """
-        # # # ALT: with growing num of allowed_swaps (until limit or sol found) # # # 
     
         num_available_swaps = int(os.environ.get('MAX_NUM_AVAILABLE_SWAPS', 1))
         test_beluga_model = BelugaModelOptSched(test_pb_def, base_filename+"_"+props_filename, num_available_swaps, None)
@@ -116,9 +73,6 @@ if __name__ == "__main__":
         props_filename = sys.argv[3]
         test_pb_def = parse_problem_and_properties(base_filename, props_filename)
         print(test_pb_def)
-        # full_problem_filename = sys.argv[2]
-        # test_pb_def = parse_problem_full(full_problem_filename)
-        # print(test_pb_def)
 
         props_ids_hard_list = [] if len(sys.argv) < 5 else list(map(PropId, sys.argv[4].strip('[]').replace(" ","").split(',')))
         test_pb_def.props_ids_hard_list = props_ids_hard_list
