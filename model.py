@@ -149,6 +149,7 @@ class BelugaModelOptSched:
         self._add_trailers_initial_jigs_opt_putdowns()
         self._add_hangars_initial_jigs_retrievals_w_opt_putdowns()
         self._add_opt_pickup_for_each_jig_last_non_swap()
+
         # # #
 
         for (j_name, flight_name, i), (unload_a, _) in self.all_unloads_w_putdowns.items():
@@ -216,28 +217,17 @@ class BelugaModelOptSched:
     def solve_with_properties(
         self,
         prop_ids: list[PropId],
-        num_swaps_to_use: int | None=None,
+        exact_num_swaps_to_use: int | None=None,
         timeout:float|None=None,
     ) -> tuple[Schedule, list[dict[str, str]]]:
         
         pb = self.pb.clone()
 
-        if num_swaps_to_use is not None:
-            pb.add_constraint(up.Equals(self.num_used_swaps, num_swaps_to_use)) # or also GE ? LE ? -> All have different pros/cons (depending on the situation, too...!..?)
+        if exact_num_swaps_to_use is not None:
+            pb.add_constraint(up.Equals(self.num_used_swaps, exact_num_swaps_to_use))
 
         for prop_id in prop_ids:
-            # print("prop: ",self.properties[prop_id])
             pb.add_constraint(self.properties[prop_id])
-
-##        prop_ids_yes = ["id00","id01","id02","id03","id04","id05","id06","id07","id08","id09","id10"]
-#        prop_ids_yes = ["id00","id01","id02","id03","id04","id06","id07","id08","id10"]
-#        prop_ids_no = ["id05","id09"]
-##        prop_ids_yes = ["id01","id02","id03","id04","id05","id06","id07"]
-##        prop_ids_no = ["id00"]
-#        for prop_id in prop_ids_yes:
-#            pb.add_constraint(self.properties[prop_id])
-#        for prop_id in prop_ids_no:
-#            pb.add_constraint(up.Not(self.properties[prop_id]))
 
         pl = solve_problem(pb, timeout)
 
@@ -829,7 +819,6 @@ class BelugaModelOptSched:
             pickup_a, putdown_a = self._make_new_swap_subactivities()
 
             self.pb.add_constraint(up.Iff(up.LT(i, self.num_used_swaps), pickup_a.present))
-            # self.pb.add_constraint(up.Implies(putdown_a.present, pickup_a.present))
             self.pb.add_constraint(up.Iff(putdown_a.present, pickup_a.present))
 
             if prev_pickup_a is not None:
@@ -910,12 +899,6 @@ class BelugaModelOptSched:
                 == self.pb.explicit_initial_values[self.rack_size(self.rack_objects[rack_name])]
             )
             terms += [rack_initially_empty]
-            #terms += [up.Implies(putdown.present, up.Not(up.Equals(putdown.get_parameter("r"), self.rack_objects[rack_name])))
-            #          for (_, putdown) in self.all_unloads_w_putdowns.values()]
-            #terms += [up.Implies(putdown.present, up.Not(up.Equals(putdown.get_parameter("r"), self.rack_objects[rack_name])))
-            #          for (_, putdown) in self.all_gets_w_putdowns.values()]
-            #terms += [up.Implies(putdown.present, up.Not(up.Equals(putdown.get_parameter("r"), self.rack_objects[rack_name])))
-            #          for (_, putdown) in self.all_swap_pickups_n_putdowns.values()]
             terms += [up.Implies(putdown.present, up.Not(up.Equals(putdown.get_parameter("r"), self.rack_objects[rack_name])))
                       for putdown in self.all_putdowns]
 
@@ -984,12 +967,6 @@ class BelugaModelOptSched:
                 assert self.rack_size(rack_jig_is_initially_at) in self.pb.explicit_initial_values
                 terms += [up.LE(self.pb.explicit_initial_values[self.rack_size(rack_jig_is_initially_at)], max_allowed_rack_size)]
 
-            #terms += [up.Implies(putdown.present, up.LE(putdown.get_parameter("rs"), max_allowed_rack_size))
-            #          for (_, putdown) in self.all_unloads_w_putdowns.values()]
-            #terms += [up.Implies(putdown.present, up.LE(putdown.get_parameter("rs"), max_allowed_rack_size))
-            #          for (_, putdown) in self.all_gets_w_putdowns.values()]
-            #terms += [up.Implies(putdown.present, up.LE(putdown.get_parameter("rs"), max_allowed_rack_size))
-            #          for (_, putdown) in self.all_swap_pickups_n_putdowns.values()]
             terms += [up.Implies(putdown.present, up.LE(putdown.get_parameter("rs"), max_allowed_rack_size))
                       for putdown in self.all_putdowns]
 
@@ -1039,19 +1016,6 @@ class BelugaModelOptSched:
             if rack_jig_is_initially_at is not None:
                 terms += [up.Not(up.Equals(rack_jig_is_initially_at, self.rack_objects[rack_name]))]
 
-            #terms += [up.Implies(putdown.present,
-            #                     up.Implies(up.Equals(putdown.get_parameter("j"), self.jig_objects[jig_name]),
-            #                                up.Not(up.Equals(putdown.get_parameter("r"), self.rack_objects[rack_name]))))
-            #          for (_, putdown) in self.all_unloads_w_putdowns.values()]
-            #terms += [up.Implies(putdown.present,
-            #                     up.Implies(up.Equals(putdown.get_parameter("j"), self.jig_objects[jig_name]),
-            #                                up.Not(up.Equals(putdown.get_parameter("r"), self.rack_objects[rack_name]))))
-            #          for (_, putdown) in self.all_gets_w_putdowns.values()]
-            #terms += [up.Implies(putdown.present,
-            #                     up.Implies(up.Equals(putdown.get_parameter("j"), self.jig_objects[jig_name]),
-            #                                up.Not(up.Equals(putdown.get_parameter("r"), self.rack_objects[rack_name]))))
-            #          for (_, putdown) in self.all_swap_pickups_n_putdowns.values()]
-            
             terms += [up.Implies(putdown.present,
                                  up.Implies(up.Equals(putdown.get_parameter("j"), self.jig_objects[jig_name]),
                                             up.Not(up.Equals(putdown.get_parameter("r"), self.rack_objects[rack_name]))))
@@ -1150,10 +1114,6 @@ class BelugaModelOptSched:
         else:
             jig1_putdown_on_rack1_before_jig2_putdown_on_rack2 = self.pb.add_variable(reif_name, up.BoolType())
 
-            all_putdowns = []
-            #all_putdowns += [putdown_a for _, putdown_a in self.all_unloads_w_putdowns.values()]
-            #all_putdowns += [putdown_a for _, putdown_a in self.all_gets_w_putdowns.values()]
-            #all_putdowns += [putdown_a for _, putdown_a in self.all_swap_pickups_n_putdowns.values()]
             all_putdowns = self.all_putdowns
 
             self.pb.add_constraint(
