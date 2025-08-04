@@ -135,7 +135,7 @@ def _parse_problem_base(d) -> BelugaProblemDef:
 
 # # # 
 
-def parse_problem_and_properties(problem_base_filename: str, problem_properties_filename: str):
+def parse_problem_and_properties(problem_base_filename: str, problem_properties_filename: str | None):
     production_lines: list[ProductionLine] = []
     flights: list[Flight] = []
 
@@ -163,90 +163,92 @@ def parse_problem_and_properties(problem_base_filename: str, problem_properties_
     props_jig_to_rack_order = []
     props_jig_to_production_line_before_flight = []
 
-    with open(problem_properties_filename) as f:
-        d = json.load(f)
+    if problem_properties_filename is not None and problem_properties_filename != "":
 
-        for property_w_id in d:
-            
-            prop_id = PropId(property_w_id["_id"])
-            name, params = property_w_id["definition"]["name"], property_w_id["definition"]["parameters"]
-            
-            if name == "unload_beluga":
-                jig, flight, i_unloading = params[0], params[1], int(params[2])
-                fl = None
-                for fl_ in flights:
-                    if fl_.name == flight:
-                        fl = fl_
-                        if i_unloading in fl.incoming:
-                            fl.incoming = { (k if k < i_unloading else k+1):v for k,v in fl.incoming.items() }
-                        assert i_unloading not in fl.incoming
-                        fl.incoming[i_unloading] = jig
-                        break
-                props_unload_beluga.append((prop_id, (jig, flight, i_unloading)))
+        with open(problem_properties_filename) as f:
+            d = json.load(f)
 
-            elif name == "load_beluga":
-                jig, flight, i_loading = params[0], params[1], int(params[2])
-                fl = None
-                for fl_ in flights:
-                    if fl_.name == flight:
-                        fl = fl_
-                        if i_loading in fl.outgoing:
-                            fl.outgoing = { (k if k < i_loading else k+1):v for k,v in fl.outgoing.items() }
-                        assert i_loading not in fl.outgoing
-                        fl.outgoing[i_loading] = jig
-                        break
-                props_load_beluga.append((prop_id, (jig, flight, i_loading)))
+            for property_w_id in d:
+                
+                prop_id = PropId(property_w_id["_id"])
+                name, params = property_w_id["definition"]["name"], property_w_id["definition"]["parameters"]
+                
+                if name == "unload_beluga":
+                    jig, flight, i_unloading = params[0], params[1], int(params[2])
+                    fl = None
+                    for fl_ in flights:
+                        if fl_.name == flight:
+                            fl = fl_
+                            if i_unloading in fl.incoming:
+                                fl.incoming = { (k if k < i_unloading else k+1):v for k,v in fl.incoming.items() }
+                            assert i_unloading not in fl.incoming
+                            fl.incoming[i_unloading] = jig
+                            break
+                    props_unload_beluga.append((prop_id, (jig, flight, i_unloading)))
 
-            elif name == "deliver_to_production_line":
-                jig, pl_name, i = params[0], params[1], int(params[2])
-                pl = None
-                for pl_ in production_lines:
-                    if pl_.name in pl_name:
-                        pl = pl_
-                        if i in pl.schedule:
-                            pl.schedule = { (k if k < i else k+1):v for k,v in pl.schedule.items() }
-                        assert i not in pl.schedule
-                        pl.schedule[i] = jig
-                        break
-                props_deliver_to_production_line.append((prop_id, (jig, pl_name, i)))
+                elif name == "load_beluga":
+                    jig, flight, i_loading = params[0], params[1], int(params[2])
+                    fl = None
+                    for fl_ in flights:
+                        if fl_.name == flight:
+                            fl = fl_
+                            if i_loading in fl.outgoing:
+                                fl.outgoing = { (k if k < i_loading else k+1):v for k,v in fl.outgoing.items() }
+                            assert i_loading not in fl.outgoing
+                            fl.outgoing[i_loading] = jig
+                            break
+                    props_load_beluga.append((prop_id, (jig, flight, i_loading)))
 
-            elif name == "rack_always_empty":
-                rack_name = params[0]
-                props_rack_always_empty.append((prop_id, rack_name))
+                elif name == "deliver_to_production_line":
+                    jig, pl_name, i = params[0], params[1], int(params[2])
+                    pl = None
+                    for pl_ in production_lines:
+                        if pl_.name in pl_name:
+                            pl = pl_
+                            if i in pl.schedule:
+                                pl.schedule = { (k if k < i else k+1):v for k,v in pl.schedule.items() }
+                            assert i not in pl.schedule
+                            pl.schedule[i] = jig
+                            break
+                    props_deliver_to_production_line.append((prop_id, (jig, pl_name, i)))
 
-            elif name == "at_least_one_rack_always_empty":
-                prop_at_least_one_rack_always_empty = prop_id
+                elif name == "rack_always_empty":
+                    rack_name = params[0]
+                    props_rack_always_empty.append((prop_id, rack_name))
 
-            elif name == "jig_always_placed_on_rack_size_leq":
-                jig_name, num = params[0], params[1]
-                props_jig_always_placed_on_rack_size_leq.append((prop_id, (jig_name, num)))
+                elif name == "at_least_one_rack_always_empty":
+                    prop_at_least_one_rack_always_empty = prop_id
 
-            elif name == "num_swaps_used_leq":
-                num = int(params[0])
-                props_num_swaps_used_leq.append((prop_id, num))
+                elif name == "jig_always_placed_on_rack_size_leq":
+                    jig_name, num = params[0], params[1]
+                    props_jig_always_placed_on_rack_size_leq.append((prop_id, (jig_name, num)))
 
-            elif name == "jig_never_on_rack":
-                jig, rack = params[0], params[1]
-                props_jig_never_on_rack.append((prop_id, (jig, rack)))
+                elif name == "num_swaps_used_leq":
+                    num = int(params[0])
+                    props_num_swaps_used_leq.append((prop_id, num))
 
-            elif name == "jig_only_if_ever_on_rack":
-                jig, rack = params[0], params[1]
-                props_jig_only_if_ever_on_rack.append((prop_id, (jig, rack)))
+                elif name == "jig_never_on_rack":
+                    jig, rack = params[0], params[1]
+                    props_jig_never_on_rack.append((prop_id, (jig, rack)))
 
-            elif name == "jig_to_production_line_order":
-                jig1, pl1, jig2, pl2 = params[0], params[1], params[2], params[3]
-                props_jig_to_production_line_order.append((prop_id, (jig1, pl1, jig2, pl2)))
+                elif name == "jig_only_if_ever_on_rack":
+                    jig, rack = params[0], params[1]
+                    props_jig_only_if_ever_on_rack.append((prop_id, (jig, rack)))
 
-            elif name == "jig_to_rack_order":
-                jig1, rack1, jig2, rack2 = params[0], params[1], params[2], params[3]
-                props_jig_to_rack_order.append((prop_id, (jig1, rack1, jig2, rack2)))
+                elif name == "jig_to_production_line_order":
+                    jig1, pl1, jig2, pl2 = params[0], params[1], params[2], params[3]
+                    props_jig_to_production_line_order.append((prop_id, (jig1, pl1, jig2, pl2)))
 
-            elif name == "jig_to_production_line_before_flight":
-                jig, pl, flight = params[0], params[1], params[2]
-                props_jig_to_production_line_before_flight.append((prop_id, (jig, pl, flight)))
+                elif name == "jig_to_rack_order":
+                    jig1, rack1, jig2, rack2 = params[0], params[1], params[2], params[3]
+                    props_jig_to_rack_order.append((prop_id, (jig1, rack1, jig2, rack2)))
 
-            else:
-                print("unsupported spec {} (for now?)".format(name))
+                elif name == "jig_to_production_line_before_flight":
+                    jig, pl, flight = params[0], params[1], params[2]
+                    props_jig_to_production_line_before_flight.append((prop_id, (jig, pl, flight)))
+
+                else:
+                    print("unsupported spec {}".format(name))
 
     return BelugaProblemDef(
         trailers_beluga=trailers_beluga,
