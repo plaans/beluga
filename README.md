@@ -229,11 +229,12 @@ The `jig` field there is used to specify if a `jig` is present on trailer / in a
 ### Properties Specification
 
 Properties are specified in a JSON file containing a single list
-whose entries represent properties (which can be seen as soft goals) and abide to the following format:
+whose entries represent properties (which can be seen as soft goals) and abide to the following format
+(where `XXXXXX` must not contain underscores (`_`) !):
 
 ```
 {
-    "_id": "prop_id",
+    "_id": "idXXXXXX",
     "definition": {
         "name": "prop_name",
         "parameters": [...],
@@ -245,7 +246,7 @@ An example entry could be the following:
 
 ```
 {
-    "_id": "prop_id00",
+    "_id": "id00",
     "definition": {
         "name": "unload_beluga",
         "parameters": ["jig0001", "beluga1", 0]
