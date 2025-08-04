@@ -272,3 +272,69 @@ def parse_problem_and_properties(problem_base_filename: str, problem_properties_
         props_jig_to_rack_order=props_jig_to_rack_order,
         props_jig_to_production_line_before_flight=props_jig_to_production_line_before_flight,
     )
+
+def convert_full_problem_props_to_properties(filename: str) -> tuple[str, str]:
+    """
+    Runs through unloads/loads (flights) and deliveries (production lines) in "legacy" full problem file.
+    
+    Outputs corresponding "base" and "props" json files.
+    """
+
+    with open(filename) as f:
+        d = json.load(f)
+
+        base_d = d
+        props_d = []
+
+        id_counter = 0
+        for pl in d['production_lines']:
+            for (i, j) in enumerate(pl['schedule']):
+                props_d.append({
+                    "_id": "id{}".format(id_counter),
+                    "definition": {
+                        "name": "deliver_to_production_line",
+                        "parameters": [j, pl['name'], i]
+                    }
+                })
+                id_counter += 1
+        for fl in d['flights']:
+            for (i, j) in enumerate(fl['incoming']):
+                props_d.append({
+                    "_id": "id{}".format(id_counter),
+                    "definition": {
+                        "name": "unload_beluga",
+                        "parameters": [j, fl['name'], i]
+                    }
+                })
+                id_counter += 1
+            for (i, jt) in enumerate(fl['outgoing']):
+                props_d.append({
+                    "_id": "id{}".format(id_counter),
+                    "definition": {
+                        "name": "load_beluga",
+                        "parameters": [jt, fl['name'], i]
+                    }
+                })
+                id_counter += 1
+
+        for i in range(len(base_d['production_lines'])):
+            base_d['production_lines'][i]['schedule'] = []
+        for i in range(len(base_d['flights'])):
+            base_d['flights'][i]['incoming'] = []
+            base_d['flights'][i]['outgoing'] = []
+
+        import os
+
+        (path, ext) = os.path.splitext(filename)
+        problem_base_filename = path + "_base" + ext
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(problem_base_filename, "w") as f:
+            json.dump(base_d, f, indent=4)
+
+        (path, ext) = os.path.splitext(filename)
+        problem_properties_filename = path + "_props" + ext
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(problem_properties_filename, "w") as f:
+            json.dump(props_d, f, indent=4)
+
+        return (problem_base_filename, problem_properties_filename)
