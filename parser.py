@@ -273,14 +273,14 @@ def parse_problem_and_properties(problem_base_filename: str, problem_properties_
         props_jig_to_production_line_before_flight=props_jig_to_production_line_before_flight,
     )
 
-def convert_full_problem_props_to_properties(filename: str) -> tuple[str, str]:
+def convert_full_problem_props_to_properties(filepath: str, destination_folder: str | None = None) -> tuple[str, str]:
     """
     Runs through unloads/loads (flights) and deliveries (production lines) in "legacy" full problem file.
     
     Outputs corresponding "base" and "props" json files.
     """
 
-    with open(filename) as f:
+    with open(filepath) as f:
         d = json.load(f)
 
         base_d = d
@@ -325,16 +325,19 @@ def convert_full_problem_props_to_properties(filename: str) -> tuple[str, str]:
 
         import os
 
-        (path, ext) = os.path.splitext(filename)
-        problem_base_filename = path + "_base" + ext
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        with open(problem_base_filename, "w") as f:
+        if destination_folder is None:
+            destination_folder = os.path.dirname(filepath)
+
+        (name, ext) = os.path.splitext(os.path.basename(filepath))
+        problem_base_filepath = os.path.join(destination_folder, name + "_base" + ext)
+        os.makedirs(os.path.dirname(problem_base_filepath), exist_ok=True)
+        with open(problem_base_filepath, "w") as f:
             json.dump(base_d, f, indent=4)
 
-        (path, ext) = os.path.splitext(filename)
-        problem_properties_filename = path + "_props" + ext
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        with open(problem_properties_filename, "w") as f:
+        (name, ext) = os.path.splitext(os.path.basename(filepath))
+        problem_properties_filepath = os.path.join(destination_folder, name + "_props" + ext)
+        os.makedirs(os.path.dirname(problem_properties_filepath), exist_ok=True)
+        with open(problem_properties_filepath, "w") as f:
             json.dump(props_d, f, indent=4)
 
-        return (problem_base_filename, problem_properties_filename)
+        return (problem_base_filepath, problem_properties_filepath)
