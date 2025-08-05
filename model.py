@@ -352,7 +352,7 @@ class BelugaModelOptSched:
         self.hangar_free = self.pb.add_fluent("free_hangar", up.BoolType(), h=self.hangar_type)
         for hangar in self.pb_def.hangars:
             hangar_obj = self.pb.add_object(hangar.name, self.hangar_type)
-            self.pb.set_initial_value(self.hangar_free(hangar_obj), True)
+            self.pb.set_initial_value(self.hangar_free(hangar_obj), hangar.jig is None)
             self.hangar_objects[hangar.name] = hangar_obj
             if hangar.jig is not None:
                 jig = self.pb_def.get_jig(hangar.jig)
@@ -369,8 +369,7 @@ class BelugaModelOptSched:
         # # #
 
         self.trailer_type = up.UserType("Trailer", self.part_location_type)
-        self.trailer_available = up.Fluent("available", up.BoolType(), t=self.trailer_type)
-        self.pb.add_fluent(self.trailer_available, default_initial_value=True)
+        self.trailer_available = self.pb.add_fluent("available", up.BoolType(), t=self.trailer_type)
         self.trailer_side = self.pb.add_fluent("trailer_side", self.side_type, trailer=self.trailer_type)
 
         num_trailers_beluga = len(self.pb_def.trailers_beluga)
@@ -382,6 +381,7 @@ class BelugaModelOptSched:
 
         for trailer in self.pb_def.trailers_beluga:
             trailer_obj = self.pb.add_object(trailer.name, self.trailer_type)
+            self.pb.set_initial_value(self.trailer_available(trailer_obj), trailer.jig is None)
             self.pb.set_initial_value(self.trailer_side(trailer_obj), self.side_beluga)
             self.trailer_objects[trailer.name] = trailer_obj
             if trailer.jig is not None:
@@ -390,6 +390,7 @@ class BelugaModelOptSched:
                 self.pb.set_initial_value(self.at(jig_obj), trailer_obj)
         for trailer in self.pb_def.trailers_factory:
             trailer_obj = self.pb.add_object(trailer.name, self.trailer_type)
+            self.pb.set_initial_value(self.trailer_available(trailer_obj), trailer.jig is None)
             self.pb.set_initial_value(self.trailer_side(trailer_obj), self.side_production)
             self.trailer_objects[trailer.name] = trailer_obj
             if trailer.jig is not None:
