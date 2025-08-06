@@ -57,5 +57,3 @@ COPY . /usr/src/beluga/
 WORKDIR /usr/src/beluga/aries-beluga/
 RUN cargo build --bin up-server --release
 RUN cargo build --bin beluga --release
-
-ENV MAX_NUM_AVAILABLE_SWAPS=1

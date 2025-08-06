@@ -1,6 +1,3 @@
-# NOTE: The environment variable MAX_NUM_AVAILABLE_SWAPS in the Dockerfile controls the max number of swaps available.
-#       Default: 1
-
 compile_all: compile_docker compile_apptainer
 
 compile_docker:
@@ -10,16 +7,16 @@ compile_docker:
 compile_apptainer:
 	apptainer build aries-beluga-apptainer.sif docker-daemon://aries-beluga-docker:latest
 
+MAXSWAPS = ""
 PBBASE = ""
 PBPROPS = ""
 
-# NOTE: Usage: make run_solve PBBASE="example_problems/test01a_base.json" PBPROPS="example_problems/test01a_props.json"
+# NOTE: Usage: make run_solve MAXSWAPS=5 PBBASE="example_problems/test01a_base.json" PBPROPS="example_problems/test01a_props.json"
 run_solve:
-	apptainer exec aries-beluga-apptainer.sif /usr/src/beluga/beluga.py solve $(PBBASE) $(PBPROPS)
+	apptainer exec aries-beluga-apptainer.sif /usr/src/beluga/beluga.py solve $(MAXSWAPS) $(PBBASE) $(PBPROPS)
 
 PROPSHARD = "[]" # Should be a list "[propid1, ..., propid2]" of property ids to consider as hard / mandatory
 
-# NOTE: Usage: make run_explain PBBASE="example_problems/test02_base.json" PBPROPS="example_problems/test02_props.json"
+# NOTE: Usage: make run_explain MAXSWAPS=2 PBBASE="example_problems/test02_base.json" PBPROPS="example_problems/test02_props.json"
 run_explain:
-	apptainer exec aries-beluga-apptainer.sif /usr/src/beluga/beluga.py explain $(PBBASE) $(PBPROPS) $(PROPSHARD)
-
+	apptainer exec aries-beluga-apptainer.sif /usr/src/beluga/beluga.py explain $(MAXSWAPS) $(PBBASE) $(PBPROPS) $(PROPSHARD)
