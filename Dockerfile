@@ -16,6 +16,9 @@ RUN apt-get install -y python3.11
 RUN python3 --version
 RUN apt-get install -y python3-pip
 
+# psutil used to refer to a process by its pid
+RUN python3 -m pip install psutil --break-system-packages
+
 # Install python packages (depdendencies for unified planning)
 
 RUN python3 -m pip install pyparser --break-system-packages
@@ -55,5 +58,5 @@ COPY . /usr/src/beluga/
 # Build the approriate Rust executables
 
 WORKDIR /usr/src/beluga/aries-beluga/
-RUN cargo build --bin up-server --release
+RUN cargo build --bin up-server --ci
 RUN cargo build --bin beluga --release

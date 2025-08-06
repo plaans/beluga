@@ -2,12 +2,29 @@
 
 import sys
 import os
+import psutil
+import signal
 
 from parser import *
 from model import *
 from checker import *
 
+# Used to make sure the aries subprocess doesn't dangle
+# (Related to this issue ? : https://github.com/plaans/aries/issues/133)
+def terminate_child_processes(signum, frame):  
+    this_process = psutil.Process(os.getpid())
+    
+    children = []
+    for child in this_process.children(recursive=True):
+        children.append(child)
+    
+    for child in children:
+        child.terminate()
+
 if __name__ == "__main__":
+
+    # signal.signal(signal.SIGINT, terminate_child_processes)
+    signal.signal(signal.SIGTERM, terminate_child_processes)
 
     dir_name = os.path.abspath(os.getcwd())
 
