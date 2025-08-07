@@ -6,7 +6,9 @@ import unified_planning.shortcuts as up
 
 from unified_planning.model.scheduling.scheduling_problem import SchedulingProblem
 from unified_planning.model.scheduling.activity import Activity
+from unified_planning.model.metrics import MinimizeSequentialPlanLength
 from unified_planning.plans import Schedule
+from unified_planning.engines import PlanGenerationResultStatus
 
 from parser import *
 
@@ -18,7 +20,10 @@ def serialize_problem(pb: up.Problem, filename: str):
         file.write(msg.SerializeToString())
 
 def solve_problem(pb: SchedulingProblem, timeout:float|None) -> Schedule: # type: ignore
-    with up.OneshotPlanner(name="aries") as planner:
+    with up.OneshotPlanner(
+        name="aries",
+        optimality_guarantee=PlanGenerationResultStatus.SOLVED_OPTIMALLY,
+    ) as planner:
         result = planner.solve( # type: ignore
             pb,
             timeout=timeout,
@@ -213,6 +218,9 @@ class BelugaModelOptSched:
         for v in self.pb.base_variables:
             if v.name.startswith("hard_prop_"):
                 self.pb.add_constraint(v)
+
+        self.pb.clear_quality_metrics()
+        self.pb.add_quality_metric(MinimizeSequentialPlanLength())
 
     def solve_with_properties(
         self,
