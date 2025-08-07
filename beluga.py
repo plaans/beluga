@@ -183,5 +183,20 @@ if __name__ == "__main__":
         
         assert False
 
+    elif sys.argv[1] == "gen-base-n-props":
+
+        problem_filepath = sys.argv[2]
+
+        assert os.path.isfile(problem_filepath)
+        assert os.path.splitext(problem_filepath)[1] == ".json"
+
+        (problem_base_filepath, problem_properties_filepath) = convert_full_problem_props_to_properties(
+            problem_filepath,
+            output_folder,
+        )
+
+        print(problem_base_filepath)
+        print(problem_properties_filepath)
+
     else:
         print("UNKNOWN (OR NOT YET IMPLEMENTED) SUBCOMMAND {}".format(sys.argv[1]))

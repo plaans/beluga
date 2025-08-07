@@ -20,3 +20,6 @@ PROPSHARD = "[]" # Should be a list "[propid1, ..., propid2]" of property ids to
 # NOTE: Usage: make run_explain MAXSWAPS=2 PBBASE="example_problems/test02_base.json" PBPROPS="example_problems/test02_props.json"
 run_explain:
 	apptainer exec aries-beluga-apptainer.sif /usr/src/beluga/beluga.py explain $(MAXSWAPS) $(PBBASE) $(PBPROPS) $(PROPSHARD)
+
+run_gen_base_n_props:
+	apptainer exec aries-beluga-apptainer.sif /usr/src/beluga/beluga.py gen-base-n-props $(PBBASE)
