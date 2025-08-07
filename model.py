@@ -9,6 +9,7 @@ from unified_planning.model.scheduling.activity import Activity
 from unified_planning.model.metrics import MinimizeSequentialPlanLength
 from unified_planning.plans import Schedule
 from unified_planning.engines import PlanGenerationResultStatus
+from unified_planning.environment import get_environment
 
 from parser import *
 
@@ -20,8 +21,10 @@ def serialize_problem(pb: up.Problem, filename: str):
         file.write(msg.SerializeToString())
 
 def solve_problem(pb: SchedulingProblem, timeout:float|None) -> Schedule: # type: ignore
+    if "aries-opt" not in get_environment().factory.engines:
+        get_environment().factory.add_engine("aries-opt", "up_aries", "AriesOpt")
     with up.OneshotPlanner(
-        name="aries",
+        name="aries-opt",
         optimality_guarantee=PlanGenerationResultStatus.SOLVED_OPTIMALLY,
     ) as planner:
         result = planner.solve( # type: ignore
