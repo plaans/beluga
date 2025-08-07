@@ -457,6 +457,7 @@ class BelugaModelOptSched:
 
     def _to_rack(self, a: Activity, jig, rack, side, oside):
         a.add_decrease_effect(up.EndTiming(), self.rack_free_space(rack), self.jig_size(jig))
+        a.add_condition(up.EndTiming(), up.GE(self.rack_free_space(rack), 0))
         a.add_decrease_effect(up.EndTiming(), self.next_(rack, side), 1)
         a.add_effect(up.EndTiming(), self.pos(jig, side), self.next_(rack, side)-1)
         a.add_effect(up.EndTiming(), self.pos(jig, oside), -self.next_(rack, side)+1)
