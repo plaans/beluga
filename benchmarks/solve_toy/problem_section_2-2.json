@@ -1,0 +1,127 @@
+{
+ "trailers_beluga": [
+  {
+   "name": "BT1",
+   "jig": null
+  }
+ ],
+ "trailers_factory": [
+  {
+   "name": "FT1",
+   "jig": "jig10"
+  },
+  {
+   "name": "FT2",
+   "jig": null
+  },
+  {
+   "name": "FT3",
+   "jig": null
+  }
+ ],
+ "hangars": [
+  {
+   "name": "Hangar1",
+   "jig": "jig09"
+  }
+ ],
+ "jig_types": {
+  "typeA": {
+   "name": "typeA",
+   "size_empty": 4,
+   "size_loaded": 4
+  },
+  "typeB": {
+   "name": "typeB",
+   "size_empty": 8,
+   "size_loaded": 11
+  },
+  "typeC": {
+   "name": "typeC",
+   "size_empty": 9,
+   "size_loaded": 18
+  },
+  "typeD": {
+   "name": "typeD",
+   "size_empty": 18,
+   "size_loaded": 25
+  },
+  "typeE": {
+   "name": "typeE",
+   "size_empty": 32,
+   "size_loaded": 32
+  }
+ },
+ "racks": [
+  {
+   "name": "rack00",
+   "size": 30,
+   "jigs": []
+  },
+  {
+   "name": "rack01",
+   "size": 36,
+   "jigs": []
+  },
+  {
+   "name": "rack02",
+   "size": 38,
+   "jigs": [
+    "jig08"
+   ]
+  },
+  {
+   "name": "rack03",
+   "size": 38,
+   "jigs": [
+    "jig03"
+   ]
+  },
+  {
+   "name": "rack04",
+   "size": 30,
+   "jigs": []
+  }
+ ],
+ "jigs": {
+  "jig03": {
+   "name": "jig03",
+   "type": "typeE",
+   "empty": true
+  },
+  "jig08": {
+   "name": "jig08",
+   "type": "typeB",
+   "empty": true
+  },
+  "jig09": {
+   "name": "jig09",
+   "type": "typeB",
+   "empty": true
+  },
+  "jig10": {
+   "name": "jig10",
+   "type": "typeC",
+   "empty": true
+  }
+ },
+ "production_lines": [
+  {
+   "name": "pl0",
+   "schedule": []
+  },
+  {
+   "name": "pl1",
+   "schedule": []
+  }
+ ],
+ "flights": [
+  {
+   "name": "beluga3",
+   "incoming": [],
+   "outgoing": [
+    "typeC"
+   ]
+  }
+ ]
+}
