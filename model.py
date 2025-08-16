@@ -1,5 +1,8 @@
 import sys
 import os
+
+import warnings
+
 from unified_planning.grpc.proto_writer import ProtobufWriter
 
 import unified_planning.shortcuts as up
@@ -32,6 +35,7 @@ def solve_problem(pb: SchedulingProblem, timeout:float|None) -> Schedule: # type
             timeout=timeout,
             output_stream=sys.stdout,
         )
+        warnings.filterwarnings("ignore", ".*obsolete", UserWarning, "google.protobuf.runtime_version")
         plan = result.plan
     return plan
 
