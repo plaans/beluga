@@ -1,3 +1,13 @@
-output/
-aries-beluga-apptainer.sif
-__pycache__/
+*
+!aries-beluga/*
+!.gitignore
+!.gitmodules
+!.dockerignore
+!Dockerfile
+!Makefile
+!README.md
+!beluga_rust
+!beluga.py
+!parser.py
+!model.py
+!checker.py
