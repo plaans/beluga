@@ -23,11 +23,14 @@ def serialize_problem(pb: up.Problem, filename: str):
     with open(filename, "wb") as file:
         file.write(msg.SerializeToString())
 
-def solve_problem(pb: SchedulingProblem, timeout:float|None) -> Schedule: # type: ignore
+def solve_problem(optim: bool, pb: SchedulingProblem, timeout:float|None) -> Schedule: # type: ignore
     if "aries-opt" not in get_environment().factory.engines:
         get_environment().factory.add_engine("aries-opt", "up_aries", "AriesOpt")
+
+    engine_name = "aries-opt" if optim else "aries"
+
     with up.OneshotPlanner(
-        name="aries-opt",
+        name=engine_name,
         optimality_guarantee=PlanGenerationResultStatus.SOLVED_OPTIMALLY,
     ) as planner:
         result = planner.solve( # type: ignore
@@ -231,6 +234,7 @@ class BelugaModelOptSched:
 
     def solve_with_properties(
         self,
+        optim: bool,
         prop_ids: list[PropId],
         exact_num_swaps_to_use: int | None=None,
         timeout:float|None=None,
@@ -244,7 +248,7 @@ class BelugaModelOptSched:
         for prop_id in prop_ids:
             pb.add_constraint(self.properties[prop_id])
 
-        pl = solve_problem(pb, timeout)
+        pl = solve_problem(optim, pb, timeout)
 
         pl_as_json = []
 

@@ -43,6 +43,8 @@ if __name__ == "__main__":
         test_pb_def = parse_problem_and_properties(base_filename, props_filename)
         print(test_pb_def)
     
+        optim = False if len(sys.argv) < 6 else bool(sys.argv[5])
+
         test_beluga_model = BelugaModelOptSched(test_pb_def, base_filename+"_"+props_filename, num_available_swaps, None)
         serialize_problem(test_beluga_model.pb, output_upp_path)
 
@@ -63,8 +65,9 @@ if __name__ == "__main__":
             )
         
             (test_plan, test_plan_as_json) = test_beluga_model.solve_with_properties(
+                optim,
                 list(test_beluga_model.properties.keys()),
-                n
+                n,
             )
         
             if test_plan is not None:
